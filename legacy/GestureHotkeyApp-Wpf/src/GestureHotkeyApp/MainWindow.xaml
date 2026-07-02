@@ -1,0 +1,352 @@
+<Window x:Class="GestureHotkeyApp.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d"
+        Title="ジェスチャーHotkey"
+        Height="860"
+        Width="1360"
+        MinHeight="720"
+        MinWidth="1120">
+    <Grid Margin="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   FontSize="22"
+                   FontWeight="Bold"
+                   Text="ジェスチャーHotkey 設定" />
+
+        <Border Grid.Row="1"
+                Margin="0,12,0,12"
+                Padding="12"
+                Background="#FFF7F7F7"
+                BorderBrush="#FFD0D0D0"
+                BorderThickness="1"
+                CornerRadius="8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0"
+                            Margin="0,0,16,0">
+                    <CheckBox Content="アプリを有効にする"
+                              IsChecked="{Binding IsEnabled}" />
+                    <CheckBox Margin="0,8,0,0"
+                              Content="Windows 起動時に開始する"
+                              IsChecked="{Binding StartWithWindows}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1"
+                            Margin="0,0,16,0">
+                    <TextBlock Text="Trigger A の開始ボタン" />
+                    <ComboBox Margin="0,6,0,0"
+                              Width="180"
+                              ItemsSource="{Binding TriggerButtonOptions}"
+                              SelectedItem="{Binding TriggerAButton}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Trigger B の開始ボタン" />
+                    <ComboBox Margin="0,6,0,0"
+                              Width="180"
+                              ItemsSource="{Binding TriggerButtonOptions}"
+                              SelectedItem="{Binding TriggerBButton}" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="3"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center">
+                    <Button Width="100"
+                            Margin="0,0,8,0"
+                            Click="SaveButton_Click"
+                            Content="保存" />
+                    <Button Width="100"
+                            Click="ReloadButton_Click"
+                            Content="再読み込み" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TabControl Grid.Row="2">
+            <TabItem Header="全体設定">
+                <Grid Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*" />
+                        <ColumnDefinition Width="1.8*" />
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Grid.Column="0"
+                              Header="グローバルアクション"
+                              Margin="0,0,12,0">
+                        <DockPanel Margin="8">
+                            <StackPanel DockPanel.Dock="Top"
+                                        Orientation="Horizontal"
+                                        Margin="0,0,0,8">
+                                <Button Width="110"
+                                        Margin="0,0,8,0"
+                                        Click="AddGlobalActionButton_Click"
+                                        Content="アクション追加" />
+                                <Button Width="110"
+                                        Click="RemoveGlobalActionButton_Click"
+                                        Content="選択削除" />
+                            </StackPanel>
+
+                            <DataGrid x:Name="GlobalActionsGrid"
+                                      AutoGenerateColumns="False"
+                                      CanUserAddRows="False"
+                                      ItemsSource="{Binding GlobalActions}"
+                                      SelectedItem="{Binding SelectedGlobalAction}">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Binding="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                                        Header="名前"
+                                                        Width="180" />
+                                    <DataGridComboBoxColumn x:Name="GlobalTriggerSlotColumn"
+                                                            Header="Trigger"
+                                                            SelectedItemBinding="{Binding TriggerSlot, UpdateSourceTrigger=PropertyChanged}"
+                                                            Width="110" />
+                                    <DataGridTextColumn Binding="{Binding GesturePatternsText, UpdateSourceTrigger=LostFocus}"
+                                                        Header="ジェスチャー"
+                                                        Width="220" />
+                                    <DataGridTextColumn Binding="{Binding HotkeyText, UpdateSourceTrigger=LostFocus}"
+                                                        Header="Hotkey"
+                                                        Width="180" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </DockPanel>
+                    </GroupBox>
+
+                    <StackPanel Grid.Column="1">
+                        <GroupBox Header="現在の状態"
+                                  Margin="0,0,0,12">
+                            <StackPanel Margin="8">
+                                <TextBlock FontWeight="SemiBold"
+                                           Text="最終認識ジェスチャー" />
+                                <TextBlock Margin="0,6,0,0"
+                                           Text="{Binding LastGestureSummary}" />
+                                <TextBlock Margin="0,16,0,0"
+                                           FontWeight="SemiBold"
+                                           Text="設定ファイル" />
+                                <TextBlock Margin="0,6,0,0"
+                                           TextWrapping="Wrap"
+                                           Text="{Binding ConfigPath}" />
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="Hotkey 記法メモ">
+                            <StackPanel Margin="8">
+                                <TextBlock Text="例: Ctrl+Shift+S / Alt+Left / Win+1 / F5" />
+                                <TextBlock Margin="0,8,0,0"
+                                           Text="ジェスチャー記法は R, L, U, D, UR, UL, DR, DL を '-' で連結します。" />
+                                <TextBlock Margin="0,8,0,0"
+                                           Text="例: L / R / U-D / DR-UL" />
+                                <TextBlock Margin="0,8,0,0"
+                                           Text="右クリックや中クリックを通常クリックとして使いたい場合は、短い押し離しで元のクリックを再生します。" />
+                            </StackPanel>
+                        </GroupBox>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="アプリ別プロファイル">
+                <Grid Margin="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="260" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <GroupBox Header="プロファイル一覧"
+                              Margin="0,0,12,0">
+                        <DockPanel Margin="8">
+                            <StackPanel DockPanel.Dock="Top"
+                                        Orientation="Horizontal"
+                                        Margin="0,0,0,8">
+                                <Button Width="100"
+                                        Margin="0,0,8,0"
+                                        Click="AddProfileButton_Click"
+                                        Content="追加" />
+                                <Button Width="100"
+                                        Click="RemoveProfileButton_Click"
+                                        Content="削除" />
+                            </StackPanel>
+                            <ListBox DisplayMemberPath="Name"
+                                     ItemsSource="{Binding AppProfiles}"
+                                     SelectedItem="{Binding SelectedProfile}" />
+                        </DockPanel>
+                    </GroupBox>
+
+                    <Grid Grid.Column="1">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="220" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <GroupBox Header="基本情報"
+                                  Margin="0,0,0,12">
+                            <Grid Margin="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="240" />
+                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="120" />
+                                    <ColumnDefinition Width="180" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock VerticalAlignment="Center"
+                                           Text="プロファイル名" />
+                                <TextBox Grid.Column="1"
+                                         Margin="8,0,16,0"
+                                         Text="{Binding SelectedProfile.Name, UpdateSourceTrigger=LostFocus}" />
+
+                                <TextBlock Grid.Column="2"
+                                           VerticalAlignment="Center"
+                                           Text="有効" />
+                                <CheckBox Grid.Column="3"
+                                          VerticalAlignment="Center"
+                                          IsChecked="{Binding SelectedProfile.Enabled}" />
+
+                                <TextBlock Grid.Column="4"
+                                           VerticalAlignment="Center"
+                                           Text="モード" />
+                                <ComboBox Grid.Column="5"
+                                          ItemsSource="{Binding ProfileModeOptions}"
+                                          SelectedItem="{Binding SelectedProfile.Mode}" />
+                            </Grid>
+                        </GroupBox>
+
+                        <GroupBox Grid.Row="1"
+                                  Header="対象アプリの判定条件"
+                                  Margin="0,0,0,12">
+                            <DockPanel Margin="8">
+                                <StackPanel DockPanel.Dock="Top"
+                                            Orientation="Horizontal"
+                                            Margin="0,0,0,8">
+                                    <Button Width="100"
+                                            Margin="0,0,8,0"
+                                            Click="AddMatcherButton_Click"
+                                            Content="条件追加" />
+                                    <Button Width="100"
+                                            Click="RemoveMatcherButton_Click"
+                                            Content="選択削除" />
+                                </StackPanel>
+
+                                <DataGrid x:Name="MatchersGrid"
+                                          AutoGenerateColumns="False"
+                                          CanUserAddRows="False"
+                                          ItemsSource="{Binding SelectedProfile.Matchers}"
+                                          SelectedItem="{Binding SelectedMatcher}">
+                                    <DataGrid.Columns>
+                                        <DataGridComboBoxColumn x:Name="MatcherTypeColumn"
+                                                                Header="種別"
+                                                                SelectedItemBinding="{Binding Type, UpdateSourceTrigger=PropertyChanged}"
+                                                                Width="140" />
+                                        <DataGridTextColumn Binding="{Binding Value, UpdateSourceTrigger=LostFocus}"
+                                                            Header="値"
+                                                            Width="*" />
+                                        <DataGridCheckBoxColumn Binding="{Binding Pattern}"
+                                                                Header="ワイルドカード"
+                                                                Width="130" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </GroupBox>
+
+                        <GroupBox Grid.Row="2"
+                                  Header="このプロファイルのアクション">
+                            <DockPanel Margin="8">
+                                <StackPanel DockPanel.Dock="Top"
+                                            Orientation="Horizontal"
+                                            Margin="0,0,0,8">
+                                    <Button Width="110"
+                                            Margin="0,0,8,0"
+                                            Click="AddProfileActionButton_Click"
+                                            Content="アクション追加" />
+                                    <Button Width="110"
+                                            Click="RemoveProfileActionButton_Click"
+                                            Content="選択削除" />
+                                </StackPanel>
+
+                                <DataGrid x:Name="ProfileActionsGrid"
+                                          AutoGenerateColumns="False"
+                                          CanUserAddRows="False"
+                                          ItemsSource="{Binding SelectedProfile.Actions}"
+                                          SelectedItem="{Binding SelectedProfileAction}">
+                                    <DataGrid.Columns>
+                                        <DataGridTextColumn Binding="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                                            Header="名前"
+                                                            Width="180" />
+                                        <DataGridComboBoxColumn x:Name="ProfileTriggerSlotColumn"
+                                                                Header="Trigger"
+                                                                SelectedItemBinding="{Binding TriggerSlot, UpdateSourceTrigger=PropertyChanged}"
+                                                                Width="110" />
+                                        <DataGridTextColumn Binding="{Binding GesturePatternsText, UpdateSourceTrigger=LostFocus}"
+                                                            Header="ジェスチャー"
+                                                            Width="260" />
+                                        <DataGridTextColumn Binding="{Binding HotkeyText, UpdateSourceTrigger=LostFocus}"
+                                                            Header="Hotkey"
+                                                            Width="200" />
+                                    </DataGrid.Columns>
+                                </DataGrid>
+                            </DockPanel>
+                        </GroupBox>
+                    </Grid>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="保存 / 移行">
+                <StackPanel Margin="16">
+                    <TextBlock FontWeight="SemiBold"
+                               Text="設定の保存・読み込み" />
+                    <TextBlock Margin="0,8,0,0"
+                               Text="現在の設定は JSON で保存されます。エクスポートも同じ形式です。" />
+
+                    <WrapPanel Margin="0,16,0,0">
+                        <Button Width="120"
+                                Margin="0,0,12,0"
+                                Click="SaveButton_Click"
+                                Content="保存" />
+                        <Button Width="120"
+                                Margin="0,0,12,0"
+                                Click="ReloadButton_Click"
+                                Content="再読み込み" />
+                        <Button Width="140"
+                                Margin="0,0,12,0"
+                                Click="ExportButton_Click"
+                                Content="エクスポート" />
+                        <Button Width="140"
+                                Click="ImportButton_Click"
+                                Content="インポート" />
+                    </WrapPanel>
+
+                    <TextBlock Margin="0,24,0,0"
+                               FontWeight="SemiBold"
+                               Text="運用メモ" />
+                    <TextBlock Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Text="MVP では Hotkey 送信だけを実装しています。RunProgram や URL 起動などは入れていません。" />
+                    <TextBlock Margin="0,8,0,0"
+                               TextWrapping="Wrap"
+                               Text="学習 UI は次フェーズですが、最終認識ジェスチャー表示を使って手動登録しやすくしています。" />
+                </StackPanel>
+            </TabItem>
+        </TabControl>
+
+        <StatusBar Grid.Row="3"
+                   Margin="0,12,0,0">
+            <StatusBarItem>
+                <TextBlock Text="{Binding StatusMessage}" />
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>

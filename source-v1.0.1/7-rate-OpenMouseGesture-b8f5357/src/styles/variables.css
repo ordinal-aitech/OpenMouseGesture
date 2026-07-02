@@ -1,0 +1,128 @@
+:root {
+  --color-primary: #0a1f0a;
+  --color-secondary: #1e3a2e;
+  --color-accent: #4ade80;
+  --color-background: #050d05;
+  --color-surface: #0f1e13;
+  --color-surface-hover: #1e3a2e;
+  --color-text: #e0f2e9;
+  --color-text-light: #86b59b;
+  --color-white: #FFFFFF;
+  --color-border: #2d4d3a;
+  --color-error: #ef4444;
+  --color-success: #22c55e;
+
+  --color-primary-hover: #163d16;
+  --color-secondary-hover: #2d5242;
+  --color-accent-hover: #5eef9a;
+
+  --color-primary-active: #0d2b0d;
+  --color-secondary-active: #244538;
+  --color-accent-active: #3bc66d;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.07);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
+
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+
+  --font-family: "Segoe UI", "Meiryo UI", sans-serif;
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+
+  --spacing-xs: 4px;
+  --spacing-sm: 8px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+
+  --transition-fast: 0.1s ease;
+  --transition-normal: 0.2s ease;
+  --transition-slow: 0.3s ease;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size-md);
+  color: var(--color-text);
+  background-color: var(--color-background);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  font-size: inherit;
+  transition: background-color var(--transition-fast), transform var(--transition-fast);
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: var(--color-surface);
+  color: var(--color-text);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px rgba(144, 171, 139, 0.25);
+}
+
+/* カスタムスクロールバー (WebKit/Chromium系) */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background-color: var(--color-surface);
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: var(--color-border);
+  border-radius: var(--radius-sm);
+  border: 2px solid var(--color-surface);
+  transition: background-color var(--transition-fast);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-secondary);
+}
+
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--color-accent);
+}
+
+::-webkit-scrollbar-corner {
+  background-color: var(--color-surface);
+}
+
+/* カスタムスクロールバー (Firefox) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) var(--color-surface);
+}

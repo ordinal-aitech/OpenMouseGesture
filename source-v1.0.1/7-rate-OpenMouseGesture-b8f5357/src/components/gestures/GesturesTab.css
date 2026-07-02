@@ -1,0 +1,62 @@
+.gestures-tab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.gestures-content {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.gestures-list-panel {
+  flex: 1;
+  overflow-y: auto;
+  background-color: var(--color-background);
+}
+
+.gestures-editor-panel {
+  width: 350px;
+  border-left: 1px solid var(--color-border);
+  background-color: var(--color-surface);
+  overflow-y: auto;
+}
+
+.gesture-preview {
+  padding: var(--spacing-xs);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.gesture-preview h3 {
+  font-size: var(--font-size-lg);
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.preview-canvas {
+  background-color: var(--color-background);
+  border-radius: var(--radius-md);
+  padding: var(--spacing-md);
+}
+
+.gesture-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: var(--spacing-xl);
+  text-align: center;
+  color: var(--color-text-light);
+}
+
+.error-message {
+  padding: var(--spacing-sm) var(--spacing-md);
+  background-color: rgba(214, 48, 49, 0.1);
+  color: var(--color-error);
+  font-size: var(--font-size-sm);
+}
+

@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install cargo-about
+        run: |
+          if (-not (Get-Command cargo-about -ErrorAction SilentlyContinue)) {
+            cargo install cargo-about
+          }
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        run: npm run tauri build
+
+      - name: Extract version from tag
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release archive
+        shell: pwsh
+        run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
+          $archiveName = "OpenMouseGesture-$version-windows-x64.zip"
+          
+          # Create temporary directory for archive contents
+          New-Item -ItemType Directory -Path "release-temp" -Force
+          
+          # Copy executable
+          Copy-Item "src-tauri\target\release\openmousegesture.exe" "release-temp\"
+          
+          # Copy config files
+          New-Item -ItemType Directory -Path "release-temp\config" -Force
+          Copy-Item "config\default-config.json" "release-temp\config\"
+          Copy-Item "config\default-gestures.json" "release-temp\config\"
+          
+          # Copy documentation
+          Copy-Item "README.md" "release-temp\"
+          Copy-Item "LICENSE" "release-temp\"
+          
+          # Create zip archive
+          Compress-Archive -Path "release-temp\*" -DestinationPath $archiveName
+          
+          echo "ARCHIVE_NAME=$archiveName" >> $env:GITHUB_OUTPUT
+        id: archive
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ${{ steps.archive.outputs.ARCHIVE_NAME }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

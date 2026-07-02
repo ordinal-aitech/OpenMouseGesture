@@ -1,0 +1,37 @@
+.gesture-canvas-container {
+  position: relative;
+  display: inline-block;
+}
+
+.gesture-canvas {
+  background-color: var(--color-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.gesture-canvas.editable {
+  cursor: crosshair;
+  border-style: dashed;
+}
+
+.gesture-canvas.editable:hover {
+  border-color: var(--color-secondary);
+}
+
+.canvas-clear-btn {
+  position: absolute;
+  bottom: var(--spacing-sm);
+  right: var(--spacing-sm);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-light);
+}
+
+.canvas-clear-btn:hover {
+  background-color: var(--color-background);
+  border-color: var(--color-secondary);
+  color: var(--color-text);
+}

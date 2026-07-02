@@ -1,0 +1,197 @@
+# 概要: config.jsonの書式定義（YAML Schema Document）
+# このファイルはconfig.jsonの構造を示すドキュメントであり、実際のスキーマファイルではありません。
+# 各フィールドの型、必須/任意、デフォルト値、説明を記載しています。
+
+# ルートオブジェクト
+type: object
+required:
+  - trajectory
+  - ignore_exe
+  - actions
+properties:
+  # 軌跡表示の有効/無効
+  trajectory:
+    type: boolean
+    description: マウスジェスチャーの軌跡を画面に表示するかどうか
+    default: true
+    example: true
+
+  # グローバル無視EXEリスト
+  ignore_exe:
+    type: array
+    items:
+      type: string
+    description: グローバルに無視するEXE名のリスト（この実行ファイル上ではジェスチャー検出をスキップする）
+    default: []
+    example:
+      - "chrome.exe"
+      - "notepad.exe"
+
+  # アクション定義リスト
+  actions:
+    type: array
+    items:
+      type: object
+      required:
+        - name
+        - trigger_type
+        - action_type
+      properties:
+        # アクション名
+        name:
+          type: string
+          description: アクションの表示名
+          example: "戻る"
+
+        # トリガータイプ
+        trigger_type:
+          type: string
+          enum:
+            - "gesture"
+            - "wheel"
+          description: |
+            アクションのトリガー種別
+            - gesture: マウスジェスチャーによるトリガー
+            - wheel: マウスホイール操作によるトリガー
+          default: "gesture"
+          example: "gesture"
+
+        # ジェスチャー名（trigger_type="gesture"の場合に使用）
+        gesture:
+          type: string
+          description: ジェスチャー名（gestures.jsonで定義されたもの、trigger_type="gesture"の場合に使用）
+          default: ""
+          example: "左"
+
+        # ホイールトリガー（trigger_type="wheel"の場合に使用）
+        wheel_trigger:
+          type: string
+          enum:
+            - ""
+            - "wheel_up"
+            - "wheel_down"
+            - "wheel_click"
+            - "leftclick_wheel_up"
+            - "leftclick_wheel_down"
+            - "x1_button"
+            - "x2_button"
+          description: |
+            ホイール操作の種類（trigger_type="wheel"の場合に使用）
+            - wheel_up: ホイールアップ
+            - wheel_down: ホイールダウン
+            - wheel_click: ホイールクリック
+            - leftclick_wheel_up: 左クリック＋ホイールアップ
+            - leftclick_wheel_down: 左クリック＋ホイールダウン
+            - x1_button: X1ボタン
+            - x2_button: X2ボタン
+          default: ""
+          example: "wheel_up"
+
+        # アクションタイプ
+        action_type:
+          type: string
+          enum:
+            - "keystroke"
+            - "command"
+            - "url"
+            - "window_operation"
+          description: |
+            実行するアクションの種類
+            - keystroke: キーストローク送信
+            - command: コマンド実行
+            - url: URL起動
+            - window_operation: ウィンドウ操作
+          example: "keystroke"
+
+        # キーストローク（action_type="keystroke"の場合に使用）
+        keystroke:
+          type: string
+          nullable: true
+          description: |
+            送信するキー（action_type="keystroke"の場合に使用）
+            例: "Left", "Right", "F5", "Tab", "VolumeUp", "VolumeDown", "MediaPlayPause"
+          example: "Left"
+
+        # 修飾キー（action_type="keystroke"の場合に使用）
+        modifiers:
+          type: array
+          items:
+            type: string
+            enum:
+              - "Ctrl"
+              - "Alt"
+              - "Shift"
+              - "Win"
+          nullable: true
+          description: キーストロークと同時に押す修飾キーのリスト
+          example:
+            - "Alt"
+
+        # コマンド（action_type="command"の場合に使用）
+        command:
+          type: string
+          nullable: true
+          description: 実行するコマンドライン（action_type="command"の場合に使用）
+          example: "notepad.exe"
+
+        # URL（action_type="url"の場合に使用）
+        url:
+          type: string
+          nullable: true
+          description: 開くURL（action_type="url"の場合に使用）
+          example: "https://www.google.com"
+
+        # ウィンドウ操作（action_type="window_operation"の場合に使用）
+        operation:
+          type: string
+          enum:
+            - "minimize"
+            - "maximize"
+            - "close"
+          nullable: true
+          description: |
+            ウィンドウに対する操作（action_type="window_operation"の場合に使用）
+            - minimize: 最小化
+            - maximize: 最大化/元に戻す
+            - close: 閉じる
+          example: "minimize"
+
+        # アクション個別の無視EXEリスト
+        ignore_exe:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: このアクション実行時に無視するEXE名のリスト
+          example:
+            - "chrome.exe"
+
+# 使用例
+example:
+  trajectory: true
+  ignore_exe: []
+  actions:
+    - name: "戻る"
+      trigger_type: "gesture"
+      gesture: "左"
+      wheel_trigger: ""
+      action_type: "keystroke"
+      keystroke: "Left"
+      modifiers:
+        - "Alt"
+      command: null
+      url: null
+      operation: null
+      ignore_exe: null
+    - name: "前のタブ"
+      trigger_type: "wheel"
+      gesture: ""
+      wheel_trigger: "wheel_down"
+      action_type: "keystroke"
+      keystroke: "Tab"
+      modifiers:
+        - "Ctrl"
+      command: null
+      url: null
+      operation: null
+      ignore_exe: null

@@ -1,0 +1,104 @@
+{
+  "trajectory": true,
+  "ignore_exe": [],
+  "triggerA": "right",
+  "triggerB": "middle",
+  "triggerC": "x1",
+  "triggerAColor": "#FF4D4F",
+  "triggerBColor": "#4C8DFF",
+  "triggerCColor": "#22A06B",
+  "groups": [
+    {
+      "id": "group-general",
+      "name": "一般"
+    },
+    {
+      "id": "group-clipboard",
+      "name": "クリップボード"
+    },
+    {
+      "id": "group-tab",
+      "name": "タブ"
+    },
+    {
+      "id": "group-uncategorized",
+      "name": "未分類"
+    }
+  ],
+  "actions": [
+    {
+      "name": "戻る",
+      "group_id": "group-general",
+      "trigger_type": "gesture",
+      "trigger_slot": "A",
+      "gesture": "左",
+      "wheel_trigger": null,
+      "action_type": "keystroke",
+      "keystroke": "Left",
+      "modifiers": ["Alt"],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "進む",
+      "group_id": "group-general",
+      "trigger_type": "gesture",
+      "trigger_slot": "A",
+      "gesture": "右",
+      "wheel_trigger": null,
+      "action_type": "keystroke",
+      "keystroke": "Right",
+      "modifiers": ["Alt"],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "コピー",
+      "group_id": "group-clipboard",
+      "trigger_type": "gesture",
+      "trigger_slot": "B",
+      "gesture": "左",
+      "wheel_trigger": null,
+      "action_type": "keystroke",
+      "keystroke": "C",
+      "modifiers": ["Ctrl"],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "貼り付け",
+      "group_id": "group-clipboard",
+      "trigger_type": "gesture",
+      "trigger_slot": "C",
+      "gesture": "左",
+      "wheel_trigger": null,
+      "action_type": "keystroke",
+      "keystroke": "V",
+      "modifiers": ["Ctrl"],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "次のタブ",
+      "group_id": "group-tab",
+      "trigger_type": "wheel",
+      "gesture": "",
+      "wheel_trigger": "wheel_down",
+      "action_type": "keystroke",
+      "keystroke": "Tab",
+      "modifiers": ["Ctrl"],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    }
+  ]
+}

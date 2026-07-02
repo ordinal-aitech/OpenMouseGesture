@@ -1,0 +1,173 @@
+{
+  "trajectory": true,
+  "ignore_exe": [],
+  "actions": [
+    {
+      "name": "戻る",
+      "trigger_type": "gesture",
+      "gesture": "左",
+      "wheel_trigger": null,
+      "action_type": "keystroke",
+      "keystroke": "Left",
+      "modifiers": [
+        "Alt"
+      ],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "進む",
+      "trigger_type": "gesture",
+      "gesture": "右",
+      "wheel_trigger": null,
+      "action_type": "keystroke",
+      "keystroke": "Right",
+      "modifiers": [
+        "Alt"
+      ],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "最小化",
+      "trigger_type": "gesture",
+      "gesture": "下",
+      "wheel_trigger": "",
+      "action_type": "window_operation",
+      "keystroke": null,
+      "modifiers": null,
+      "command": null,
+      "url": null,
+      "operation": "minimize",
+      "ignore_exe": null
+    },
+    {
+      "name": "最大化",
+      "trigger_type": "gesture",
+      "gesture": "上",
+      "wheel_trigger": "",
+      "action_type": "window_operation",
+      "keystroke": null,
+      "modifiers": null,
+      "command": null,
+      "url": null,
+      "operation": "maximize",
+      "ignore_exe": null
+    },
+    {
+      "name": "閉じる",
+      "trigger_type": "gesture",
+      "gesture": "下→右",
+      "wheel_trigger": "",
+      "action_type": "keystroke",
+      "keystroke": "F4",
+      "modifiers": [
+        "Ctrl"
+      ],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "更新",
+      "trigger_type": "gesture",
+      "gesture": "上→下",
+      "wheel_trigger": "",
+      "action_type": "keystroke",
+      "keystroke": "F5",
+      "modifiers": null,
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "前のタブ",
+      "trigger_type": "wheel",
+      "gesture": "",
+      "wheel_trigger": "wheel_down",
+      "action_type": "keystroke",
+      "keystroke": "Tab",
+      "modifiers": [
+        "Ctrl"
+      ],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "次のタブ",
+      "trigger_type": "wheel",
+      "gesture": "",
+      "wheel_trigger": "wheel_up",
+      "action_type": "keystroke",
+      "keystroke": "Tab",
+      "modifiers": [
+        "Ctrl",
+        "Shift"
+      ],
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "音量ダウン",
+      "trigger_type": "wheel",
+      "gesture": "",
+      "wheel_trigger": "leftclick_wheel_down",
+      "action_type": "keystroke",
+      "keystroke": "VolumeDown",
+      "modifiers": null,
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "音量アップ",
+      "trigger_type": "wheel",
+      "gesture": "",
+      "wheel_trigger": "leftclick_wheel_up",
+      "action_type": "keystroke",
+      "keystroke": "VolumeUp",
+      "modifiers": null,
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "再生・一時停止",
+      "trigger_type": "wheel",
+      "gesture": "",
+      "wheel_trigger": "wheel_click",
+      "action_type": "keystroke",
+      "keystroke": "MediaPlayPause",
+      "modifiers": null,
+      "command": null,
+      "url": null,
+      "operation": null,
+      "ignore_exe": null
+    },
+    {
+      "name": "Googleを開く",
+      "trigger_type": "gesture",
+      "gesture": "G",
+      "wheel_trigger": null,
+      "action_type": "url",
+      "keystroke": null,
+      "modifiers": null,
+      "command": null,
+      "url": "https://google.com",
+      "operation": null,
+      "ignore_exe": null
+    }
+  ]
+}
