@@ -1,0 +1,1018 @@
+{
+    "formatVersion":  1,
+    "appName":  "GestureHotkeyApp",
+    "exportedAt":  "1783015329",
+    "config":  {
+                   "trajectory":  true,
+                   "ignore_exe":  [
+
+                                  ],
+                   "triggerA":  "right",
+                   "triggerB":  "middle",
+                   "triggerC":  "x1",
+                   "triggerAColor":  "#FF4D4F",
+                   "triggerBColor":  "#4C8DFF",
+                   "triggerCColor":  "#22A06B",
+                   "groups":  [
+                                  {
+                                      "id":  "group-general",
+                                      "name":  "一般"
+                                  },
+                                  {
+                                      "id":  "group-clipboard",
+                                      "name":  "クリップボード"
+                                  },
+                                  {
+                                      "id":  "group-tab",
+                                      "name":  "タブ"
+                                  },
+                                  {
+                                      "id":  "group-uncategorized",
+                                      "name":  "未分類"
+                                  }
+                              ],
+                   "actions":  [
+                                   {
+                                       "name":  "カット",
+                                       "group_id":  "group-clipboard",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "A",
+                                       "gesture":  "左",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "X",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "コピー",
+                                       "group_id":  "group-clipboard",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "A",
+                                       "gesture":  "右",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "C",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "シフトデリート",
+                                       "group_id":  "group-clipboard",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "A",
+                                       "gesture":  "下",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Delete",
+                                       "modifiers":  [
+                                                         "Shift"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "デリート",
+                                       "group_id":  "group-clipboard",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "A",
+                                       "gesture":  "上",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Delete"
+                                   },
+                                   {
+                                       "name":  "ペースト",
+                                       "group_id":  "group-clipboard",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "A",
+                                       "gesture":  "下→右",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "V",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "リネーム",
+                                       "group_id":  "group-clipboard",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "A",
+                                       "gesture":  "上→下",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "F2"
+                                   },
+                                   {
+                                       "name":  "開く",
+                                       "group_id":  "group-tab",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "A",
+                                       "gesture":  "G",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "T",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "進む",
+                                       "group_id":  "group-tab",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "B",
+                                       "gesture":  "左",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Tab",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "閉じたタブを開く",
+                                       "group_id":  "group-tab",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "B",
+                                       "gesture":  "右",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "T",
+                                       "modifiers":  [
+                                                         "Ctrl",
+                                                         "Shift"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "閉じる",
+                                       "group_id":  "group-tab",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "B",
+                                       "gesture":  "下",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "W",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "戻る",
+                                       "group_id":  "group-tab",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "B",
+                                       "gesture":  "上",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Tab",
+                                       "modifiers":  [
+                                                         "Ctrl",
+                                                         "Shift"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "ウィンドウ切替",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "B",
+                                       "gesture":  "下→右",
+                                       "action_type":  "window_operation",
+                                       "operation":  "maximize"
+                                   },
+                                   {
+                                       "name":  "ウィンドウ選択",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "B",
+                                       "gesture":  "上→下",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Tab",
+                                       "modifiers":  [
+                                                         "Win"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "やり直し",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "B",
+                                       "gesture":  "G",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Y",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "検索",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "C",
+                                       "gesture":  "左",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "F",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "元に戻す",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "C",
+                                       "gesture":  "右",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Z",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "更新",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "C",
+                                       "gesture":  "下",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "F5"
+                                   },
+                                   {
+                                       "name":  "最小化",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "C",
+                                       "gesture":  "上",
+                                       "action_type":  "window_operation",
+                                       "operation":  "minimize"
+                                   },
+                                   {
+                                       "name":  "進む",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "C",
+                                       "gesture":  "下→右",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Right",
+                                       "modifiers":  [
+                                                         "Alt"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "先頭",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "C",
+                                       "gesture":  "上→下",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "Home",
+                                       "modifiers":  [
+                                                         "Ctrl"
+                                                     ]
+                                   },
+                                   {
+                                       "name":  "全画面化",
+                                       "group_id":  "group-general",
+                                       "trigger_type":  "gesture",
+                                       "trigger_slot":  "C",
+                                       "gesture":  "G",
+                                       "action_type":  "keystroke",
+                                       "keystroke":  "F11"
+                                   }
+                               ]
+               },
+    "gestures":  [
+                     {
+                         "name":  "左",
+                         "points":  [
+                                        [
+                                            202.0,
+                                            140.0
+                                        ],
+                                        [
+                                            194.0,
+                                            140.0
+                                        ],
+                                        [
+                                            190.0,
+                                            141.0
+                                        ],
+                                        [
+                                            173.0,
+                                            141.0
+                                        ],
+                                        [
+                                            153.0,
+                                            141.0
+                                        ],
+                                        [
+                                            129.0,
+                                            141.0
+                                        ],
+                                        [
+                                            121.0,
+                                            141.0
+                                        ],
+                                        [
+                                            107.0,
+                                            141.0
+                                        ],
+                                        [
+                                            100.0,
+                                            141.0
+                                        ],
+                                        [
+                                            94.0,
+                                            141.0
+                                        ],
+                                        [
+                                            93.0,
+                                            141.0
+                                        ]
+                                    ]
+                     },
+                     {
+                         "name":  "右",
+                         "points":  [
+                                        [
+                                            62.0,
+                                            131.0
+                                        ],
+                                        [
+                                            65.0,
+                                            130.0
+                                        ],
+                                        [
+                                            74.0,
+                                            128.0
+                                        ],
+                                        [
+                                            93.0,
+                                            125.0
+                                        ],
+                                        [
+                                            105.0,
+                                            125.0
+                                        ],
+                                        [
+                                            133.0,
+                                            125.0
+                                        ],
+                                        [
+                                            157.0,
+                                            124.0
+                                        ],
+                                        [
+                                            179.0,
+                                            124.0
+                                        ],
+                                        [
+                                            198.0,
+                                            124.0
+                                        ],
+                                        [
+                                            202.0,
+                                            124.0
+                                        ],
+                                        [
+                                            205.0,
+                                            124.0
+                                        ],
+                                        [
+                                            209.0,
+                                            124.0
+                                        ]
+                                    ]
+                     },
+                     {
+                         "name":  "下",
+                         "points":  [
+                                        [
+                                            119.0,
+                                            62.0
+                                        ],
+                                        [
+                                            119.0,
+                                            63.0
+                                        ],
+                                        [
+                                            119.0,
+                                            70.0
+                                        ],
+                                        [
+                                            119.0,
+                                            74.0
+                                        ],
+                                        [
+                                            119.0,
+                                            86.0
+                                        ],
+                                        [
+                                            119.0,
+                                            94.0
+                                        ],
+                                        [
+                                            119.0,
+                                            111.0
+                                        ],
+                                        [
+                                            119.0,
+                                            125.0
+                                        ],
+                                        [
+                                            119.0,
+                                            131.0
+                                        ],
+                                        [
+                                            119.0,
+                                            137.0
+                                        ],
+                                        [
+                                            119.0,
+                                            163.0
+                                        ],
+                                        [
+                                            119.0,
+                                            170.0
+                                        ],
+                                        [
+                                            119.0,
+                                            175.0
+                                        ],
+                                        [
+                                            119.0,
+                                            176.0
+                                        ],
+                                        [
+                                            119.0,
+                                            178.0
+                                        ],
+                                        [
+                                            119.0,
+                                            179.0
+                                        ],
+                                        [
+                                            118.0,
+                                            183.0
+                                        ],
+                                        [
+                                            118.0,
+                                            187.0
+                                        ],
+                                        [
+                                            118.0,
+                                            193.0
+                                        ],
+                                        [
+                                            118.0,
+                                            199.0
+                                        ],
+                                        [
+                                            118.0,
+                                            200.0
+                                        ],
+                                        [
+                                            118.0,
+                                            201.0
+                                        ]
+                                    ]
+                     },
+                     {
+                         "name":  "上",
+                         "points":  [
+                                        [
+                                            125.0,
+                                            186.0
+                                        ],
+                                        [
+                                            125.0,
+                                            181.0
+                                        ],
+                                        [
+                                            125.0,
+                                            169.0
+                                        ],
+                                        [
+                                            125.0,
+                                            161.0
+                                        ],
+                                        [
+                                            126.0,
+                                            138.0
+                                        ],
+                                        [
+                                            126.0,
+                                            114.0
+                                        ],
+                                        [
+                                            127.0,
+                                            98.0
+                                        ],
+                                        [
+                                            129.0,
+                                            83.0
+                                        ],
+                                        [
+                                            129.0,
+                                            73.0
+                                        ],
+                                        [
+                                            129.0,
+                                            66.0
+                                        ],
+                                        [
+                                            129.0,
+                                            65.0
+                                        ],
+                                        [
+                                            129.0,
+                                            64.0
+                                        ]
+                                    ]
+                     },
+                     {
+                         "name":  "下→右",
+                         "points":  [
+                                        [
+                                            79.0,
+                                            85.0
+                                        ],
+                                        [
+                                            79.0,
+                                            87.0
+                                        ],
+                                        [
+                                            79.0,
+                                            92.0
+                                        ],
+                                        [
+                                            79.0,
+                                            101.0
+                                        ],
+                                        [
+                                            79.0,
+                                            115.0
+                                        ],
+                                        [
+                                            79.0,
+                                            127.0
+                                        ],
+                                        [
+                                            79.0,
+                                            133.0
+                                        ],
+                                        [
+                                            79.0,
+                                            136.0
+                                        ],
+                                        [
+                                            79.0,
+                                            140.0
+                                        ],
+                                        [
+                                            79.0,
+                                            145.0
+                                        ],
+                                        [
+                                            79.0,
+                                            147.0
+                                        ],
+                                        [
+                                            79.0,
+                                            148.0
+                                        ],
+                                        [
+                                            79.0,
+                                            149.0
+                                        ],
+                                        [
+                                            80.0,
+                                            149.0
+                                        ],
+                                        [
+                                            81.0,
+                                            149.0
+                                        ],
+                                        [
+                                            82.0,
+                                            149.0
+                                        ],
+                                        [
+                                            91.0,
+                                            152.0
+                                        ],
+                                        [
+                                            100.0,
+                                            154.0
+                                        ],
+                                        [
+                                            115.0,
+                                            155.0
+                                        ],
+                                        [
+                                            129.0,
+                                            157.0
+                                        ],
+                                        [
+                                            149.0,
+                                            157.0
+                                        ],
+                                        [
+                                            166.0,
+                                            157.0
+                                        ],
+                                        [
+                                            172.0,
+                                            157.0
+                                        ],
+                                        [
+                                            174.0,
+                                            157.0
+                                        ]
+                                    ]
+                     },
+                     {
+                         "name":  "上→下",
+                         "points":  [
+                                        [
+                                            87.0,
+                                            211.0
+                                        ],
+                                        [
+                                            87.0,
+                                            209.0
+                                        ],
+                                        [
+                                            87.0,
+                                            207.0
+                                        ],
+                                        [
+                                            91.0,
+                                            185.0
+                                        ],
+                                        [
+                                            94.0,
+                                            175.0
+                                        ],
+                                        [
+                                            100.0,
+                                            150.0
+                                        ],
+                                        [
+                                            106.0,
+                                            123.0
+                                        ],
+                                        [
+                                            112.0,
+                                            102.0
+                                        ],
+                                        [
+                                            115.0,
+                                            90.0
+                                        ],
+                                        [
+                                            119.0,
+                                            78.0
+                                        ],
+                                        [
+                                            124.0,
+                                            66.0
+                                        ],
+                                        [
+                                            127.0,
+                                            61.0
+                                        ],
+                                        [
+                                            128.0,
+                                            58.0
+                                        ],
+                                        [
+                                            128.0,
+                                            57.0
+                                        ],
+                                        [
+                                            128.0,
+                                            57.0
+                                        ],
+                                        [
+                                            128.0,
+                                            60.0
+                                        ],
+                                        [
+                                            129.0,
+                                            64.0
+                                        ],
+                                        [
+                                            132.0,
+                                            74.0
+                                        ],
+                                        [
+                                            133.0,
+                                            78.0
+                                        ],
+                                        [
+                                            135.0,
+                                            93.0
+                                        ],
+                                        [
+                                            141.0,
+                                            114.0
+                                        ],
+                                        [
+                                            148.0,
+                                            137.0
+                                        ],
+                                        [
+                                            153.0,
+                                            154.0
+                                        ],
+                                        [
+                                            154.0,
+                                            158.0
+                                        ],
+                                        [
+                                            158.0,
+                                            166.0
+                                        ],
+                                        [
+                                            159.0,
+                                            170.0
+                                        ],
+                                        [
+                                            160.0,
+                                            172.0
+                                        ],
+                                        [
+                                            160.0,
+                                            173.0
+                                        ],
+                                        [
+                                            161.0,
+                                            175.0
+                                        ],
+                                        [
+                                            161.0,
+                                            176.0
+                                        ],
+                                        [
+                                            162.0,
+                                            178.0
+                                        ],
+                                        [
+                                            162.0,
+                                            179.0
+                                        ],
+                                        [
+                                            163.0,
+                                            181.0
+                                        ],
+                                        [
+                                            163.0,
+                                            182.0
+                                        ],
+                                        [
+                                            163.0,
+                                            183.0
+                                        ]
+                                    ]
+                     },
+                     {
+                         "name":  "G",
+                         "points":  [
+                                        [
+                                            167.0,
+                                            118.0
+                                        ],
+                                        [
+                                            167.0,
+                                            117.0
+                                        ],
+                                        [
+                                            167.0,
+                                            113.0
+                                        ],
+                                        [
+                                            167.0,
+                                            112.0
+                                        ],
+                                        [
+                                            166.0,
+                                            108.0
+                                        ],
+                                        [
+                                            165.0,
+                                            105.0
+                                        ],
+                                        [
+                                            162.0,
+                                            101.0
+                                        ],
+                                        [
+                                            159.0,
+                                            98.0
+                                        ],
+                                        [
+                                            156.0,
+                                            95.0
+                                        ],
+                                        [
+                                            148.0,
+                                            89.0
+                                        ],
+                                        [
+                                            138.0,
+                                            84.0
+                                        ],
+                                        [
+                                            135.0,
+                                            82.0
+                                        ],
+                                        [
+                                            129.0,
+                                            80.0
+                                        ],
+                                        [
+                                            117.0,
+                                            78.0
+                                        ],
+                                        [
+                                            109.0,
+                                            77.0
+                                        ],
+                                        [
+                                            105.0,
+                                            77.0
+                                        ],
+                                        [
+                                            96.0,
+                                            77.0
+                                        ],
+                                        [
+                                            83.0,
+                                            77.0
+                                        ],
+                                        [
+                                            69.0,
+                                            83.0
+                                        ],
+                                        [
+                                            64.0,
+                                            85.0
+                                        ],
+                                        [
+                                            61.0,
+                                            87.0
+                                        ],
+                                        [
+                                            56.0,
+                                            92.0
+                                        ],
+                                        [
+                                            51.0,
+                                            99.0
+                                        ],
+                                        [
+                                            45.0,
+                                            113.0
+                                        ],
+                                        [
+                                            43.0,
+                                            123.0
+                                        ],
+                                        [
+                                            42.0,
+                                            129.0
+                                        ],
+                                        [
+                                            42.0,
+                                            142.0
+                                        ],
+                                        [
+                                            42.0,
+                                            152.0
+                                        ],
+                                        [
+                                            46.0,
+                                            162.0
+                                        ],
+                                        [
+                                            50.0,
+                                            167.0
+                                        ],
+                                        [
+                                            55.0,
+                                            174.0
+                                        ],
+                                        [
+                                            64.0,
+                                            181.0
+                                        ],
+                                        [
+                                            83.0,
+                                            190.0
+                                        ],
+                                        [
+                                            95.0,
+                                            193.0
+                                        ],
+                                        [
+                                            100.0,
+                                            195.0
+                                        ],
+                                        [
+                                            107.0,
+                                            196.0
+                                        ],
+                                        [
+                                            114.0,
+                                            196.0
+                                        ],
+                                        [
+                                            120.0,
+                                            196.0
+                                        ],
+                                        [
+                                            124.0,
+                                            194.0
+                                        ],
+                                        [
+                                            129.0,
+                                            187.0
+                                        ],
+                                        [
+                                            134.0,
+                                            179.0
+                                        ],
+                                        [
+                                            135.0,
+                                            170.0
+                                        ],
+                                        [
+                                            135.0,
+                                            162.0
+                                        ],
+                                        [
+                                            135.0,
+                                            160.0
+                                        ],
+                                        [
+                                            133.0,
+                                            156.0
+                                        ],
+                                        [
+                                            132.0,
+                                            155.0
+                                        ],
+                                        [
+                                            137.0,
+                                            158.0
+                                        ],
+                                        [
+                                            152.0,
+                                            168.0
+                                        ],
+                                        [
+                                            166.0,
+                                            173.0
+                                        ],
+                                        [
+                                            175.0,
+                                            176.0
+                                        ],
+                                        [
+                                            184.0,
+                                            180.0
+                                        ],
+                                        [
+                                            190.0,
+                                            183.0
+                                        ],
+                                        [
+                                            191.0,
+                                            186.0
+                                        ],
+                                        [
+                                            191.0,
+                                            187.0
+                                        ],
+                                        [
+                                            191.0,
+                                            196.0
+                                        ],
+                                        [
+                                            190.0,
+                                            198.0
+                                        ],
+                                        [
+                                            181.0,
+                                            214.0
+                                        ],
+                                        [
+                                            177.0,
+                                            224.0
+                                        ],
+                                        [
+                                            177.0,
+                                            225.0
+                                        ],
+                                        [
+                                            175.0,
+                                            229.0
+                                        ],
+                                        [
+                                            175.0,
+                                            230.0
+                                        ]
+                                    ]
+                     }
+                 ]
+}

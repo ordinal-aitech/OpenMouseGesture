@@ -1,0 +1,1123 @@
+﻿FStrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null
+!StrokesPlus.net.Code.ImportExport
+)<IsCompleteSettingsObject>k__BackingField'<IncludeGeneralSettings>k__BackingField <IncludeGestures>k__BackingField!<IncludeLeftClick>k__BackingField#<IncludeMiddleClick>k__BackingField"<IncludeRightClick>k__BackingField
+<IncludeX1Click>k__BackingField
+<IncludeX2Click>k__BackingField!<IncludeWheelTick>k__BackingField"<IncludeHWheelTick>k__BackingField%<IncludeReleaseScript>k__BackingField"<IncludeLoadScript>k__BackingField$<IncludeUnloadScript>k__BackingField)<IncludeWindowFocusScript>k__BackingField
+<SourceVersion>k__BackingField
+<Settings>k__BackingField
+StrokesPlus.net.Code.Settings
+QSystem.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a
+WSystem.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089
+StrokesPlus.net.Code.Settings
+disposed
+hintAppFont
+hintActionFont
+hintTipFont
+DisplayChangedTimerInterval
+SettingsFormMaximized
+SettingsLocation
+UseScriptEnginePool"CreateNewScriptEngineEachExecution
+UseBeforeActionScript
+UseAfterActionScript
+PlaySoundOnNoMatch
+RelayGestureOnNoMatch
+NoMatchSoundFile
+ExternalScriptFile
+HintShowDelay
+HintPointThreshold
+HintPadding
+DisableDisplayMismatchMessage
+HintBackColor
+HintForeColor
+HintLocation
+HintOpacity
+CaptureModifiersOnMouseDown
+AllowGestureRegions
+TouchPadSensitivity
+MatchProbabilityThreshold
+TouchPadThresholdDelta
+MatchPrecision
+_touchPadFingers
+PenWidth
+PenOpacity
+_captureEnabled
+PenColor
+SecondaryPenColor
+IgnoreKey
+IgnoreKeyList
+EnableOnNoIgnore
+CheckCursorFlags
+LearningMode
+FireOnMouseWheel
+ResetCancelDelayOnMovement
+DrawWindowAlwaysOnTop
+DrawWindowToBottom
+MouseWheelRelay
+MouseWheelTick
+HorzMouseWheelTick
+OnlyAllowDefinedApps
+ActivateMouseWheelWindow(ActivateMouseWheelWindowInExclusionZones
+FireOnRightClick
+FireOnMiddleClick
+FireOnLeftClick
+FireOnX1Click
+FireOnX2Click
+FireOnWindowFocus
+MinSegmentLength
+MaxDrawPoints
+DrawGesture
+MinGestureStartDistance
+FireOnRelease
+CancelDelay
+StrokeButton
+SecondaryStrokeButton
+ShowGestureHints
+HintLooseMatching
+RockerSupport
+FireOnLoadAction
+FireOnCloseAction%AlwaysActivateWindowOnGestureComplete
+ModLeftColor
+ModMiddleColor
+ModRightColor
+ModControlColor
+ModAltColor
+ModShiftColor
+ModX1Color
+ModX2Color
+ModWheelUpColor
+ModWheelDownColor
+GlobalApplication
+Applications
+IgnoredApplications
+Gestures
+Hotkeys
+OnLoadAction
+OnCloseAction
+LeftClickAction
+MiddleClickAction
+RightClickAction
+X1ClickAction
+X2ClickAction
+WindowFocusAction
+DeviceChangeAction
+WindowCreatedAction
+WindowDestroyedAction
+LanguageChangedAction
+VerticalWheelTickAction
+HorizontalWheelTickAction
+StrokeReleaseAction
+ScintillaFont
+ScintillaFontSize
+ScintillaCommentColor
+ScintillaStringColor
+ScintillaStringBackColor
+ScintillaCharacterColor
+ScintillaIdentifierColor
+ScintillaNumberColor
+ScintillaLineNumberColor
+ScintillaKeywordColor
+ScintillaSecondaryKeywordColor
+ScintillaOperatorColor
+ScintillaClassColor
+ScintillaCaretColor
+ScintillaFontColor
+ScintillaFontBackColor
+ScintillaMarkerBackColor
+ScintillaMarkerColor
+GestureThumbnailBackgroundColor
+ScintillaIdentifierBackColor
+ScintillaCommentBackColor
+ScintillaNumberBackColor
+ScintillaCharacterBackColor
+ScintillaKeywordBackColor"ScintillaSecondaryKeywordBackColor
+ScintillaOperatorBackColor
+ScintillaClassBackColor
+ScintillaLineNumberBackColor
+ScintillaFoldMarginColor!ScintillaFoldMarginHighlightColor
+ScintillaSelectionBackColor
+DisableUpdateCheck
+GlobalActionRegionsUseAppRect
+_touchFloaterMinAlpha
+_touchFloaterMaxAlpha
+_touchFloaterFadeMilliseconds%AutoShowHideTouchFloatersInTabletMode$DisableMouseCaptureWhenFloaterActive
+_clicksToActivateFloaterMenu
+_clicksTimerIntervalForFloater
+TouchAltFloaterUndocked
+TouchControlFloaterUndocked
+TouchShiftFloaterUndocked
+TouchSpecialFloaterUndocked
+TouchAltFloaterKeyMode
+TouchControlFloaterKeyMode
+TouchShiftFloaterKeyMode
+TouchSpecialFloaterKeyMode
+_touchFloaterLocation
+_touchAltFloaterLocation
+_touchControlFloaterLocation
+_touchShiftFloaterLocation
+_touchSpecialFloaterLocation
+TouchPrimaryFloaterSize
+TouchAltFloaterSize
+TouchControlFloaterSize
+TouchShiftFloaterSize
+TouchSpecialFloaterSize
+CustomFloaters
+TraceSegments
+TouchFloaterShown
+TouchDisableControlFloater
+TouchDisableAltFloater
+TouchDisableShiftFloater
+TouchFloaterOthersShown
+EnableDisplayChangeMessage
+_textExpansionTokenLengthLimit#_textExpansionClipboardRestoreDelay$DisableTextExpansionRestoreClipboard4<DisableTextExpansionTriggerUseEnter>k__BackingField4<DisableTextExpansionTriggerUseSpace>k__BackingField2<DisableTextExpansionTriggerUseTab>k__BackingField
+_textExpansionTokenClearDelay!_textExpansionClipboardPasteDelay"_textExpansionClipboardLockTimeout
+_scriptEngineLockAttempts
+_maxScriptEnginePoolSize.DisableScriptEngineLockAttemptsExceededMessage
+EnableV8ScriptDebugging
+ManualDisable'DisableAccountValidationConnectionError
+PlugInSearchLocations
+PlugInExcludedList
+SavedMacroCategories
+HotkeyCategories
+SavedMacros
+DisableRelayOnGestureTimeout'DisableMacroOptionsIncludeWindowDetails)DisableMacroOptionsShowRecordStartMessage/DisableMacroOptionsShowRecordClearScriptWarning
+UseAlternativeDrawingMethod
+SetForegroundLockTimeout
+_macroOptionsMinimumSleepDelay
+_macroOptionsMinimumMouseDelta
+_macroOptionsSleepMultiplier
+DisableHighResolutionSleep
+EnableScriptInterruptedError
+ConsumeLeftClick
+ConsumeMiddleClick
+ConsumeRightClick
+ConsumeX1Click
+ConsumeX2Click
+ConsumeWheelTick
+ConsumeHWheelTick
+ActivateWindowUseRootParent
+LastAnnouncementSeen(<MouseHookExclusionZones>k__BackingField2<PreventCaptureOnFullScreenWindows>k__BackingField
+<FloaterLayouts>k__BackingField&<SelectedFloaterLayout>k__BackingField.<KeepHotkeysActiveWhenDisabled>k__BackingField'<DisableSingleTrayClick>k__BackingField'<SendKeysForAppCommands>k__BackingField
+<HintFadeSteps>k__BackingField <HintHideAppName>k__BackingField-<NewerSettingUpdatesCompleted>k__BackingField#<MouseAccelerationX>k__BackingField#<MouseAccelerationY>k__BackingField2<EnableWMIMethodForProcessFileName>k__BackingField1<EnableMouseHookEventSubscription>k__BackingField4<EnableKeyboardHookEventSubscription>k__BackingField.<SpaceResetsTextExpansionToken>k__BackingField?<DisableSendSpaceLeftDeleteOnTextExpansionMatch>k__BackingField#_textExpansionTokenBeforeClearDelay <SelectedCulture>k__BackingField#<FireOnDeviceChange>k__BackingField"<UseNewClassesOnly>k__BackingField
+<UseNewSettings>k__BackingField(<EditorReplacementTokens>k__BackingField
+<UserLibraries>k__BackingField
+ConsoleBackColor
+ConsoleForeColor
+ConsoleLogColor
+ConsoleWarningColor
+ConsoleErrorColor
+ConsoleLocation
+ConsoleTimestampDisabled
+ConsoleSelectedTab-<LogScriptErrorsToConsoleOnly>k__BackingField
+ConsoleShowOnSystemError
+ConsoleDisableWordWrap
+ConsoleLastScript
+ConsoleWindowOpacity
+ConsoleWindowTopMost
+ConsoleWindowMaximized
+Enable2DTextRendering
+CustomMacroStopKey
+<SavedStrings>k__BackingField
+SilentStart
+HintLocationCustom
+ConsoleStartDelay
+<Themes>k__BackingField
+NoMatchAction,<UseLegacyClearGestureMethod>k__BackingField
+<Version>k__BackingField(<LastSettingsSectionName>k__BackingField)<LastGlobalActionCategory>k__BackingField%<LastGlobalActionName>k__BackingField+<LastGlobalActionSubtabName>k__BackingField6<LastGlobalActionTextExpansionCategory>k__BackingField2<LastGlobalActionTextExpansionName>k__BackingField.<LastGlobalActionSubSubtabName>k__BackingField <LastApplication>k__BackingField(<LastApplicationCategory>k__BackingField*<LastApplicationActionName>k__BackingField*<LastApplicationSubtabName>k__BackingField-<LastApplicationSubSubtabName>k__BackingField5<LastApplicationTextExpansionCategory>k__BackingField1<LastApplicationTextExpansionName>k__BackingField2<LastApplicationMouseExclusionZone>k__BackingField <LastFloaterName>k__BackingField&<LastFloaterSubtabName>k__BackingField#<LastHotkeyCategory>k__BackingField
+<LastHotkeyName>k__BackingField&<LastIgnoredWindowName>k__BackingField&<LastOptionsSubtabName>k__BackingField"<LastMacroCategory>k__BackingField
+<LastMacroName>k__BackingField"<LastPlugInTabName>k__BackingField'<LastMouseExclusionZone>k__BackingField
+System.Drawing.Font
+System.Drawing.Font
+System.Drawing.Font
+System.Drawing.Rectangle
+System.Drawing.Color
+System.Drawing.Color
+%StrokesPlus.net.Code.HintLocationEnum
+?StrokesPlus.net.Engine.StrokesPlusClasses+Types+WinApi+COLORREF
+?StrokesPlus.net.Engine.StrokesPlusClasses+Types+WinApi+COLORREF
+.StrokesPlus.net.Hooks.HookState+IgnoreKeyTypes
+System.Collections.Generic.List`1[[StrokesPlus.net.Hooks.HookState+IgnoreKeyTypes, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+!System.Windows.Forms.MouseButtons
+!System.Windows.Forms.MouseButtons
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+ StrokesPlus.net.Code.Application
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Application, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.IgnoredApplication, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Gesture, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Hotkey, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+StrokesPlus.net.Code.BaseAction
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.CustomFloaterSetting, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.SavedMacro, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.MouseHookExclusionZone, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.FloaterLayout, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.Dictionary`2[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089],[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Rectangle
+System.Collections.Generic.Dictionary`2[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089],[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Drawing.Point
+System.Collections.Generic.List`1[[StrokesPlus.net.Engine.StrokesPlusClasses+Types+Internal+Theme, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+StrokesPlus.net.Code.BaseAction
+System.Drawing.Rectangle
+width
+height
+C:\Windows\Media\ding.wav
+System.Drawing.Color
+name
+value
+knownColor
+state
+%StrokesPlus.net.Code.HintLocationEnum
+value__
+?StrokesPlus.net.Engine.StrokesPlusClasses+Types+WinApi+COLORREF
+Value
+.StrokesPlus.net.Hooks.HookState+IgnoreKeyTypes
+value__
+!System.Windows.Forms.MouseButtons
+value__
+Consolas
+System.Drawing.Point
+1.00
+ja-JP
+tabSystem
+0.5.8.0
+toolImportExport
+tabActions
+Brave
+General
+tabActionList
+System.Drawing.Font
+Name
+Size
+Style
+Unit
+System.Drawing.FontStyle
+System.Drawing.GraphicsUnit
+Segoe UI
+System.Drawing.FontStyle
+value__
+System.Drawing.GraphicsUnit
+value__
+Segoe UI Semibold
+Segoe UI
+System.Collections.Generic.List`1[[StrokesPlus.net.Hooks.HookState+IgnoreKeyTypes, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+0StrokesPlus.net.Hooks.HookState+IgnoreKeyTypes[]
+ StrokesPlus.net.Code.Application"
+<Categories>k__BackingField
+_textExpansionCategories
+<Actions>k__BackingField
+_textExpansion <NoGlobalActions>k__BackingField
+<RegionType>k__BackingField!<RegionCustomCols>k__BackingField!<RegionCustomRows>k__BackingField
+CancelDelay <UseBeforeAction>k__BackingField
+<BeforeAction>k__BackingField
+<UseAfterAction>k__BackingField
+<AfterAction>k__BackingField(<MouseHookExclusionZones>k__BackingField,ApplicationBase+<Description>k__BackingField)ApplicationBase+<Sequence>k__BackingField+ApplicationBase+<MatchCount>k__BackingField'ApplicationBase+<Active>k__BackingField%ApplicationBase+<Icon>k__BackingField,ApplicationBase+<Synchronize>k__BackingField/ApplicationBase+<OwnerClassName>k__BackingField.ApplicationBase+<RootClassName>k__BackingField0ApplicationBase+<ParentClassName>k__BackingField1ApplicationBase+<ControlClassName>k__BackingField0ApplicationBase+<OwnerWindowText>k__BackingField/ApplicationBase+<RootWindowText>k__BackingField1ApplicationBase+<ParentWindowText>k__BackingField2ApplicationBase+<ControlWindowText>k__BackingField)ApplicationBase+<FilePath>k__BackingField)ApplicationBase+<FileName>k__BackingField*ApplicationBase+<ControlID>k__BackingField1ApplicationBase+<IgnoreFullScreen>k__BackingField4ApplicationBase+<ImportAppDefinition>k__BackingField9ApplicationBase+<ImportBeforeAfterScripts>k__BackingField
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Action, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.TextExpansion, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+StrokesPlus.net.Code.RegionType
++StrokesPlus.net.Code.BeforeAfterActionFlags
+StrokesPlus.net.Code.BaseAction
++StrokesPlus.net.Code.BeforeAfterActionFlags
+StrokesPlus.net.Code.BaseAction
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.MouseHookExclusionZone, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Drawing.Icon
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+nSystem.Nullable`1[[System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+StrokesPlus.net.Code.RegionType
+value__
++StrokesPlus.net.Code.BeforeAfterActionFlags
+value__
+Global
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Application, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+"StrokesPlus.net.Code.Application[]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.IgnoredApplication, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+)StrokesPlus.net.Code.IgnoredApplication[]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Gesture, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+StrokesPlus.net.Code.Gesture[]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Hotkey, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+StrokesPlus.net.Code.Hotkey[]
+StrokesPlus.net.Code.BaseAction
+<Category>k__BackingField
+<Description>k__BackingField
+<Comments>k__BackingField
+<Active>k__BackingField
+<Synchronize>k__BackingField
+<Type>k__BackingField&<LastSelectedStepIndex>k__BackingField
+<Steps>k__BackingField
+<Script>k__BackingField(<LastScriptCaretPosition>k__BackingField
+<SourceVersion>k__BackingField
+StrokesPlus.net.Code.ActionType
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.ActionStep, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+StrokesPlus.net.Code.ActionType
+value__
+j//This script will run when you start or reload StrokesPlus.net. 
+//It will be run in each script engine 
+6//This script will run when you unload StrokesPlus.net
+// Use this to perform an action when a window becomes active.
+// Use sp.ForegroundWindow() and it's properties to determine what window became activer
+// Get all devices and return list. 
+// Each device has only the four properties listed below
+var devices = sp.AllDevices();
+var deviceList = "";
+for(var i = 0; i < devices.Count; i++)
+    deviceList += `DeviceID: ${devices[i].DeviceID}
+    Name: ${devices[i].Name}
+    Description: ${devices[i].Description}
+    Status: ${devices[i].Status}
+// Copy list to clipboard
+clip.SetText(deviceList);
+// Example to look for a specific device
+if(devices.Where(d => d.Name == "Rob's Galaxy Note10").Count() > 0) {
+    sp.MessageBox("Phone connected!", "Galaxy Phone via Bluetooth");
+//This is a script I use, but figured I'd leave it for example purposes
+if(wheel.Window.Process.MainModule.ModuleName == "chrome.exe" || wheel.Window.Process.MainModule.ModuleName == "notepad++.exe") {
+    if(parseInt(wheel.Y) <= (parseInt(wheel.Window.Rectangle.Top) + 64)) {//is the mouse in the top 64 pixel area of the window?
+        if(wheel.Delta > 0) {
+            //mouse wheel scrolled up
+            sp.SendKeys("^{TAB}");
+        } else {
+            //mouse wheel scrolled down
+            sp.SendKeys("^+{TAB}");
+        }
+    } else if(wheel.X >= (parseInt(wheel.Window.Rectangle.Right) - 25)) { //is the mouse along the right side of the window?
+        if(wheel.Delta > 0) {
+            //scroll up, send CTRL+Home to go to the top of the page
+            sp.SendKeys("^{HOME}");
+        } else {
+            //scroll up, send CTRL+End to go to the end of the page
+            sp.SendKeys("^{END}");
+        }
+    } else if(wheel.Window.Process.MainModule.ModuleName == "chrome.exe" && wheel.X <= (parseInt(wheel.Window.Rectangle.Left) + 20)) {
+        if(wheel.Delta > 0){
+            //scroll up, send CTRL+Home to go to the top of the page
+            sp.SendKeys("{F5}");
+        } else {
+            //scroll up, send CTRL+End to go to the end of the page
+            sp.SendVKey(vk.BROWSER_BACK);
+        }
+    } else {
+        //Default, pass mouse wheel message onto the original control
+        wheel.Control.PostMessage(host.cast(uint, 0x020A), new IntPtr(wheel.WParam), new IntPtr(wheel.LParam));
+    }
+} else {
+    //Default, pass mouse wheel message onto the original control
+    wheel.Control.PostMessage(host.cast(uint, 0x020A), new IntPtr(wheel.WParam), new IntPtr(wheel.LParam));
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.CustomFloaterSetting, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
++StrokesPlus.net.Code.CustomFloaterSetting[]
+System.Collections.Generic.List`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+_items
+_size
+_version
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.SavedMacro, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+!StrokesPlus.net.Code.SavedMacro[]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.MouseHookExclusionZone, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+-StrokesPlus.net.Code.MouseHookExclusionZone[]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.FloaterLayout, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+$StrokesPlus.net.Code.FloaterLayout[]
+System.Collections.Generic.Dictionary`2[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089],[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+Version
+Comparer
+HashSize
+System.Collections.Generic.GenericEqualityComparer`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Engine.StrokesPlusClasses+Types+Internal+Theme, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+@StrokesPlus.net.Engine.StrokesPlusClasses+Types+Internal+Theme[]
+.StrokesPlus.net.Hooks.HookState+IgnoreKeyTypes
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.Action, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+StrokesPlus.net.Code.Action[]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.TextExpansion, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+$StrokesPlus.net.Code.TextExpansion[]
+4//This script will run before the action itself runs
+3//This script will run after the action itself runs
+ StrokesPlus.net.Code.Application
+'StrokesPlus.net.Code.IgnoredApplication
+StrokesPlus.net.Code.Gesture
+StrokesPlus.net.Code.Hotkey
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.ActionStep, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+!StrokesPlus.net.Code.ActionStep[]
+)StrokesPlus.net.Code.CustomFloaterSetting
+StrokesPlus.net.Code.SavedMacro
++StrokesPlus.net.Code.MouseHookExclusionZone
+"StrokesPlus.net.Code.FloaterLayout
+SendKeysForAppCommandReversion
+EditorReplacementTokens
+UserLibraries
+ConsoleDefaults2
+ApplicationexclusionZones
+SavedStringsInit
+SavedScintillaInitColors14
+ConsoleStartupDelay
+DefaultThemesInit
+System.Collections.Generic.GenericEqualityComparer`1[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+>StrokesPlus.net.Engine.StrokesPlusClasses+Types+Internal+Theme
+StrokesPlus.net.Code.Action
+"StrokesPlus.net.Code.TextExpansion
+'StrokesPlus.net.Code.IgnoredApplication
+<DisableOnFocus>k__BackingField,ApplicationBase+<Description>k__BackingField)ApplicationBase+<Sequence>k__BackingField+ApplicationBase+<MatchCount>k__BackingField'ApplicationBase+<Active>k__BackingField%ApplicationBase+<Icon>k__BackingField,ApplicationBase+<Synchronize>k__BackingField/ApplicationBase+<OwnerClassName>k__BackingField.ApplicationBase+<RootClassName>k__BackingField0ApplicationBase+<ParentClassName>k__BackingField1ApplicationBase+<ControlClassName>k__BackingField0ApplicationBase+<OwnerWindowText>k__BackingField/ApplicationBase+<RootWindowText>k__BackingField1ApplicationBase+<ParentWindowText>k__BackingField2ApplicationBase+<ControlWindowText>k__BackingField)ApplicationBase+<FilePath>k__BackingField)ApplicationBase+<FileName>k__BackingField*ApplicationBase+<ControlID>k__BackingField1ApplicationBase+<IgnoreFullScreen>k__BackingField4ApplicationBase+<ImportAppDefinition>k__BackingField9ApplicationBase+<ImportBeforeAfterScripts>k__BackingField
+System.Drawing.Icon
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+"StrokesPlus.net.Code.MatchCriteria
+nSystem.Nullable`1[[System.Int32, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+VMWare
+World of Warcraft
+StrokesPlus.net.Code.Gesture
+<Name>k__BackingField
+<Active>k__BackingField
+<PointPatterns>k__BackingField#<MultiPointPatterns>k__BackingField
+<MatchCount>k__BackingField
+<Synchronize>k__BackingField
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.PointPattern, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.MultiPointPattern, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+Down
+Up Left
+/ Up
+/ Down
+/ Up / Down
+\ Up \ Down
+Triangle
+\ Up
+\ Down
+Up Right
+Right
+Left
+Square
+Right Down
+Left Down
+Eraser
+Right Up
+Up Down
+Left Up
+Down Up
+/ Down / Up
+\ Down \ Up
+StrokesPlus.net.Code.ActionStep
+>StrokesPlus.net.Engine.StrokesPlusClasses+Types+Internal+Theme^
+<Name>k__BackingField
+<Active>k__BackingField
+<Dark>k__BackingField
+<DefaultFont>k__BackingField
+<DefaultColor>k__BackingField!<DefaultBackColor>k__BackingField
+<EmptyBackColor>k__BackingField
+<ButtonColor>k__BackingField <ButtonBackColor>k__BackingField"<ButtonBorderColor>k__BackingField!<ButtonHoverColor>k__BackingField%<ButtonHoverBackColor>k__BackingField'<ButtonHoverBorderColor>k__BackingField$<ButtonDisabledColor>k__BackingField(<ButtonDisabledBackColor>k__BackingField*<ButtonDisabledBorderColor>k__BackingField%<StandardControlColor>k__BackingField)<StandardControlBackColor>k__BackingField+<StandardControlBorderColor>k__BackingField*<StandardControlHoverColor>k__BackingField.<StandardControlHoverBackColor>k__BackingField0<StandardControlHoverBorderColor>k__BackingField-<StandardControlDisabledColor>k__BackingField1<StandardControlDisabledBackColor>k__BackingField3<StandardControlDisabledBorderColor>k__BackingField
+<TabsColor>k__BackingField
+<TabsBackColor>k__BackingField <TabsBorderColor>k__BackingField <TabsActiveColor>k__BackingField$<TabsActiveBackColor>k__BackingField&<TabsActiveBorderColor>k__BackingField
+<TabsHoverColor>k__BackingField#<TabsHoverBackColor>k__BackingField%<TabsHoverBorderColor>k__BackingField"<TabsDisabledColor>k__BackingField&<TabsDisabledBackColor>k__BackingField(<TabsDisabledBorderColor>k__BackingField
+<ContainerColor>k__BackingField#<ContainerBackColor>k__BackingField!<MainToolbarColor>k__BackingField%<MainToolbarBackColor>k__BackingField'<MainToolbarButtonColor>k__BackingField+<MainToolbarButtonBackColor>k__BackingField-<MainToolbarButtonBorderColor>k__BackingField-<MainToolbarButtonActiveColor>k__BackingField1<MainToolbarButtonActiveBackColor>k__BackingField3<MainToolbarButtonActiveBorderColor>k__BackingField,<MainToolbarButtonHoverColor>k__BackingField0<MainToolbarButtonHoverBackColor>k__BackingField2<MainToolbarButtonHoverBorderColor>k__BackingField/<MainToolbarButtonDisabledColor>k__BackingField3<MainToolbarButtonDisabledBackColor>k__BackingField
+<ToolbarsColor>k__BackingField"<ToolbarsBackColor>k__BackingField$<ToolbarsButtonColor>k__BackingField(<ToolbarsButtonBackColor>k__BackingField*<ToolbarsButtonBorderColor>k__BackingField)<ToolbarsButtonHoverColor>k__BackingField-<ToolbarsButtonHoverBackColor>k__BackingField/<ToolbarsButtonHoverBorderColor>k__BackingField,<ToolbarsButtonDisabledColor>k__BackingField0<ToolbarsButtonDisabledBackColor>k__BackingField2<ToolbarsButtonDisabledBorderColor>k__BackingField!<GestureBackColor>k__BackingField%<ScriptEditorFontSize>k__BackingField%<ScriptEditorFontName>k__BackingField'<ScriptEditorCaretColor>k__BackingField/<ScriptEditorSelectionBackColor>k__BackingField&<ScriptEditorFontColor>k__BackingField*<ScriptEditorFontBackColor>k__BackingField)<ScriptEditorCommentColor>k__BackingField-<ScriptEditorCommentBackColor>k__BackingField(<ScriptEditorNumberColor>k__BackingField,<ScriptEditorNumberBackColor>k__BackingField,<ScriptEditorIdentifierColor>k__BackingField0<ScriptEditorIdentifierBackColor>k__BackingField(<ScriptEditorStringColor>k__BackingField,<ScriptEditorStringBackColor>k__BackingField,<ScriptEditorFoldMarginColor>k__BackingField5<ScriptEditorFoldMarginHighlightColor>k__BackingField*<ScriptEditorOperatorColor>k__BackingField.<ScriptEditorOperatorBackColor>k__BackingField2<ScriptEditorSecondaryKeywordColor>k__BackingField6<ScriptEditorSecondaryKeywordBackColor>k__BackingField)<ScriptEditorKeywordColor>k__BackingField-<ScriptEditorKeywordBackColor>k__BackingField+<ScriptEditorCharacterColor>k__BackingField/<ScriptEditorCharacterBackColor>k__BackingField(<ScriptEditorMarkerColor>k__BackingField,<ScriptEditorMarkerBackColor>k__BackingField'<ScriptEditorClassColor>k__BackingField+<ScriptEditorClassBackColor>k__BackingField,<ScriptEditorLineNumberColor>k__BackingField0<ScriptEditorLineNumberBackColor>k__BackingField
+System.Drawing.Font
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+System.Drawing.Color
+Light (Default)
+Consolas
+Light (Default)
+Consolas
+StrokesPlus.net.Code.Action
+<Sequence>k__BackingField)<UseSecondaryStrokeButton>k__BackingField
+<MatchCount>k__BackingField
+<RegionColRows>k__BackingField
+<GestureName>k__BackingField <SynapticFingers>k__BackingField
+<Capture>k__BackingField
+<Control>k__BackingField
+<Alt>k__BackingField
+<Shift>k__BackingField
+<Left>k__BackingField
+<Middle>k__BackingField
+<Right>k__BackingField
+<X1>k__BackingField
+<X2>k__BackingField
+<WheelUp>k__BackingField
+<WheelDown>k__BackingField$BaseAction+<Category>k__BackingField'BaseAction+<Description>k__BackingField$BaseAction+<Comments>k__BackingField"BaseAction+<Active>k__BackingField'BaseAction+<Synchronize>k__BackingField BaseAction+<Type>k__BackingField1BaseAction+<LastSelectedStepIndex>k__BackingField!BaseAction+<Steps>k__BackingField"BaseAction+<Script>k__BackingField3BaseAction+<LastScriptCaretPosition>k__BackingField)BaseAction+<SourceVersion>k__BackingField
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.RegionColRow, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+$StrokesPlus.net.Code.ModifierCapture
+StrokesPlus.net.Code.ActionType
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.ActionStep, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+Right
+$StrokesPlus.net.Code.ModifierCapture
+value__
+Left
+Down
+/ Down
+\ Up
+/ Up
+\ Down
+Left Up
+Left Down
+Up Left
+Up Right
+/ Down / Up
+Left
+Right
+Left Up
+// Open the Windows File Explorer
+sp.RunProgram(sp.ExpandEnvironmentVariables("%SystemRoot%")+"\\explorer.exe", "", "", "", false, false, false);
+Center
+// Center the window underneath the mouse cursor where the gesture started to the screen the program is on
+action.Window.Center();
+Down
+|// Send the close command to the window underneath the mouse cursor where the gesture started 
+action.Window.SendClose();
+Right Up
+// Maximize or restore the window underneath the mouse cursor where the gesture started
+if(action.Window.Maximized) {
+    action.Window.Restore();
+} else {
+    action.Window.Maximize();
+8sp.SendWinDown();
+sp.SendVKey(vk.TAB);
+sp.SendWinUp();
+Up Down
+Right Down
+\ Down \ Up
+"StrokesPlus.net.Code.MatchCriteria
+<Value>k__BackingField
+<IsRegex>k__BackingField
+VMPlayerFrame
+Wow.*
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.PointPattern, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+#StrokesPlus.net.Code.PointPattern[]
+Segoe UI
+Segoe UI
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.RegionColRow, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+#StrokesPlus.net.Code.RegionColRow[]
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.PointPattern
+!StrokesPlus.net.Code.RegionColRow
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+!StrokesPlus.net.Code.RegionColRow
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+StrokesPlus.net.Code.ActionStep
+!StrokesPlus.net.Code.PointPattern
+<Points>k__BackingField
+<MatchCount>k__BackingField
+<Order>k__BackingField
+System.Collections.Generic.List`1[[System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]]
+StrokesPlus.net.Code.ActionStep
+<Description>k__BackingField
+<Sequence>k__BackingField
+<Active>k__BackingField
+<Assembly>k__BackingField
+<Type>k__BackingField
+<Method>k__BackingField&<LastSelectedParameter>k__BackingField2<LastSelectedObjectMethodParameter>k__BackingField!<MethodParameters>k__BackingField
+<Parameters>k__BackingField
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.ActionStepParameter, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+System.Collections.Generic.List`1[[System.Collections.Generic.KeyValuePair`2[[System.String, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089],[System.Object, mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]], mscorlib, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089]]
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendString
+characters
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendString
+characters
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+@Open Explorer. Use RunProgram to provide more specific commands.
+&StrokesPlus.net.Engine.ActionFunctions
+command
+aCenters the window on the screen. Demonstrates invoking an object method [action.Window.Center()]
+&StrokesPlus.net.Engine.ActionFunctions
+InvokeObjectMethodByName
+methodName
+&Sends the Close command to the window.
+&StrokesPlus.net.Engine.ActionFunctions
+MinimizeWindow
+window
+!StrokesPlus.net.Code.RegionColRow
+<RegionColumn>k__BackingField
+<RegionRow>k__BackingField
+>Maximize or Restore the window, depending on its current state
+&StrokesPlus.net.Engine.ActionFunctions
+MaximizeOrRestoreWindow
+window
+&StrokesPlus.net.Engine.ActionFunctions
+SendWinDown
+&StrokesPlus.net.Engine.ActionFunctions
+SendVKey
+virtualKey
+WSends the Win key down event, then the Tab key press, followed by releasing the Win key
+&StrokesPlus.net.Engine.ActionFunctions
+SendWinUp
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+&StrokesPlus.net.Engine.ActionFunctions
+SendHotKey
+hotkey
+System.Collections.Generic.List`1[[System.Drawing.Point, System.Drawing, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]]
+_items
+_size
+_version
+System.Drawing.Point[]
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.ActionStepParameter, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+_items
+_size
+_version
+*StrokesPlus.net.Code.ActionStepParameter[]
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+System.Drawing.Point
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+(StrokesPlus.net.Code.ActionStepParameter
+<Name>k__BackingField
+<Value>k__BackingField#<ObjectMethodParams>k__BackingField
+<FromStack>k__BackingField
+<LeaveOnStack>k__BackingField
+<BuiltIn>k__BackingField(<DirectInputSelectedType>k__BackingField
+System.Collections.Generic.List`1[[StrokesPlus.net.Code.ActionStepParameter, StrokesPlus.net, Version=0.5.8.0, Culture=neutral, PublicKeyToken=null]]
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+characters
+ohka.type11@gmail.com
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+hotkey
+characters
+watakou0604@gmail.com
+hotkey
+command
+BC:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe
+sourceObject
+_actionVar.Window
+objMethodParameters
+methodName
+Center
+window
+_actionVar.Window
+window
+_actionVar.Window
+virtualKey
+hotkey
+hotkey
+hotkey
+OWindowsInput, Version=1.0.7.0, Culture=neutral, PublicKeyToken=de2685b4776e9c2e
+1StrokesPlus.net.Engine.ActionFunctions+StepHotkey
+<LControl>k__BackingField
+<RControl>k__BackingField
+<LAlt>k__BackingField
+<RAlt>k__BackingField
+<LShift>k__BackingField
+<RShift>k__BackingField
+<LWin>k__BackingField
+<RWin>k__BackingField
+<Key>k__BackingField
+"WindowsInput.Native.VirtualKeyCode
+"WindowsInput.Native.VirtualKeyCode
+value__

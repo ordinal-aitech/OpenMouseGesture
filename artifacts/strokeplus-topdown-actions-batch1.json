@@ -1,0 +1,206 @@
+[
+  {
+    "name": "カット",
+    "group_id": "group-clipboard",
+    "trigger_type": "gesture",
+    "trigger_slot": "A",
+    "gesture": "左",
+    "action_type": "keystroke",
+    "keystroke": "X",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "コピー",
+    "group_id": "group-clipboard",
+    "trigger_type": "gesture",
+    "trigger_slot": "A",
+    "gesture": "右",
+    "action_type": "keystroke",
+    "keystroke": "C",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "シフトデリート",
+    "group_id": "group-clipboard",
+    "trigger_type": "gesture",
+    "trigger_slot": "A",
+    "gesture": "下",
+    "action_type": "keystroke",
+    "keystroke": "Delete",
+    "modifiers": ["Shift"]
+  },
+  {
+    "name": "デリート",
+    "group_id": "group-clipboard",
+    "trigger_type": "gesture",
+    "trigger_slot": "A",
+    "gesture": "上",
+    "action_type": "keystroke",
+    "keystroke": "Delete"
+  },
+  {
+    "name": "ペースト",
+    "group_id": "group-clipboard",
+    "trigger_type": "gesture",
+    "trigger_slot": "A",
+    "gesture": "下→右",
+    "action_type": "keystroke",
+    "keystroke": "V",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "リネーム",
+    "group_id": "group-clipboard",
+    "trigger_type": "gesture",
+    "trigger_slot": "A",
+    "gesture": "上→下",
+    "action_type": "keystroke",
+    "keystroke": "F2"
+  },
+  {
+    "name": "開く",
+    "group_id": "group-tab",
+    "trigger_type": "gesture",
+    "trigger_slot": "A",
+    "gesture": "G",
+    "action_type": "keystroke",
+    "keystroke": "T",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "進む",
+    "group_id": "group-tab",
+    "trigger_type": "gesture",
+    "trigger_slot": "B",
+    "gesture": "左",
+    "action_type": "keystroke",
+    "keystroke": "Tab",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "閉じたタブを開く",
+    "group_id": "group-tab",
+    "trigger_type": "gesture",
+    "trigger_slot": "B",
+    "gesture": "右",
+    "action_type": "keystroke",
+    "keystroke": "T",
+    "modifiers": ["Ctrl", "Shift"]
+  },
+  {
+    "name": "閉じる",
+    "group_id": "group-tab",
+    "trigger_type": "gesture",
+    "trigger_slot": "B",
+    "gesture": "下",
+    "action_type": "keystroke",
+    "keystroke": "W",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "戻る",
+    "group_id": "group-tab",
+    "trigger_type": "gesture",
+    "trigger_slot": "B",
+    "gesture": "上",
+    "action_type": "keystroke",
+    "keystroke": "Tab",
+    "modifiers": ["Ctrl", "Shift"]
+  },
+  {
+    "name": "ウィンドウ切替",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "B",
+    "gesture": "下→右",
+    "action_type": "window_operation",
+    "operation": "maximize"
+  },
+  {
+    "name": "ウィンドウ選択",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "B",
+    "gesture": "上→下",
+    "action_type": "keystroke",
+    "keystroke": "Tab",
+    "modifiers": ["Win"]
+  },
+  {
+    "name": "やり直し",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "B",
+    "gesture": "G",
+    "action_type": "keystroke",
+    "keystroke": "Y",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "検索",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "C",
+    "gesture": "左",
+    "action_type": "keystroke",
+    "keystroke": "F",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "元に戻す",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "C",
+    "gesture": "右",
+    "action_type": "keystroke",
+    "keystroke": "Z",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "更新",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "C",
+    "gesture": "下",
+    "action_type": "keystroke",
+    "keystroke": "F5"
+  },
+  {
+    "name": "最小化",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "C",
+    "gesture": "上",
+    "action_type": "window_operation",
+    "operation": "minimize"
+  },
+  {
+    "name": "進む",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "C",
+    "gesture": "下→右",
+    "action_type": "keystroke",
+    "keystroke": "Right",
+    "modifiers": ["Alt"]
+  },
+  {
+    "name": "先頭",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "C",
+    "gesture": "上→下",
+    "action_type": "keystroke",
+    "keystroke": "Home",
+    "modifiers": ["Ctrl"]
+  },
+  {
+    "name": "全画面化",
+    "group_id": "group-general",
+    "trigger_type": "gesture",
+    "trigger_slot": "C",
+    "gesture": "G",
+    "action_type": "keystroke",
+    "keystroke": "F11"
+  }
+]
