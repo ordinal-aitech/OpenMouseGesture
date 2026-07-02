@@ -1,0 +1,2 @@
+# OpenMouseGesture
+Windows向けマウスジェスチャー開発
