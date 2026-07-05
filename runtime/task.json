@@ -1,109 +1,33 @@
 {
-  "schema_version": "1.0",
-  "task_id": "openmousegesture-build-installer-2026-07-05",
-  "title": "Generate GestureHotkeyApp Windows installer",
-  "created_at": "2026-07-05T12:20:00+09:00",
-  "orchestrator": {
-    "mode": "ai-orchestrator-test",
-    "worker": "codex-cli",
-    "output_policy": "minimal"
+  "task_id": "agent-20260705-openmousegesture-build-installer",
+  "status": "ready",
+  "payload": {
+    "action": "agent_task",
+    "execution_agent": "codex",
+    "execution_provider": "codex_cli",
+    "working_directory": "C:\\GitHub\\OpenMouseGesture",
+    "timeout_seconds": 3600,
+    "instruction": "You are running under AI Orchestrator as a minimal-output Codex CLI worker. Read docs/codex-handoff-spec.md, docs/progress-log.md, docs/build-environment-setup.md, artifacts/run-tauri-build.cmd, source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/package.json, and source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/tauri.conf.json. Do only this task: build GestureHotkeyApp and generate the Windows NSIS installer. Use C:\\GitHub\\OpenMouseGesture as the repository root and source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 as the app working directory. Run npm install if needed, then npm run build, then npm run tauri build or cmd /c C:\\GitHub\\OpenMouseGesture\\artifacts\\run-tauri-build.cmd if the Visual Studio Build Tools environment is required. Verify these outputs: source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/GestureHotkeyApp.exe and source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp_0.1.0_x64-setup.exe. If source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp-setup.exe exists, report it too; if it does not exist, say so. Do not redesign or refactor application code. Do not enable action label overlay. Do not upload installers to GitHub Releases or external services. Do not commit generated target/ output unless explicitly instructed later. Do not run the installer unless a human explicitly permits it during this task. Final output should be concise and include success/failed/blocked, commands run, generated file paths, file sizes, timestamps, errors if any, and whether human action is required."
   },
-  "repository": {
-    "full_name": "ordinal-aitech/OpenMouseGesture",
-    "default_branch": "main",
-    "local_root_expected": "C:\\GitHub\\OpenMouseGesture"
-  },
-  "objective": "Build the current GestureHotkeyApp source and generate the Windows NSIS installer executable.",
-  "scope": {
-    "primary_working_directory": "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357",
-    "read_first": [
-      "docs/codex-handoff-spec.md",
-      "docs/progress-log.md",
-      "docs/build-environment-setup.md",
-      "artifacts/run-tauri-build.cmd",
-      "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/package.json",
-      "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/tauri.conf.json"
-    ],
-    "allowed_actions": [
-      "Check required local tools: node, npm, cargo, rustc, git, cl, link, makensis if available.",
-      "Run npm install if node_modules is missing or dependencies are not installed.",
-      "Run npm run build.",
-      "Run npm run tauri build, preferably through artifacts/run-tauri-build.cmd when Visual Studio Build Tools environment is required.",
-      "Verify generated files under src-tauri/target/release and src-tauri/target/release/bundle/nsis.",
-      "Create report.json at repository root with the final result."
-    ],
-    "disallowed_actions": [
-      "Do not redesign or refactor application code.",
-      "Do not change product requirements or shared AI rules.",
-      "Do not commit generated target/ output unless explicitly instructed later.",
-      "Do not upload installers to GitHub Releases or external services.",
-      "Do not enable action label overlay. It is intentionally disabled for stability."
-    ]
-  },
-  "commands": {
-    "preferred_windows_cmd": [
-      "cd /d C:\\GitHub\\OpenMouseGesture\\source-v1.0.1\\7-rate-OpenMouseGesture-b8f5357",
-      "npm install",
-      "npm run build",
-      "cmd /c C:\\GitHub\\OpenMouseGesture\\artifacts\\run-tauri-build.cmd"
-    ],
-    "fallback_powershell": [
-      "Set-Location C:\\GitHub\\OpenMouseGesture\\source-v1.0.1\\7-rate-OpenMouseGesture-b8f5357",
-      "npm install",
-      "npm run build",
-      "npm run tauri build"
-    ]
-  },
-  "expected_outputs": [
-    {
-      "type": "application_executable",
-      "path": "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/GestureHotkeyApp.exe",
-      "required": true
+  "metadata": {
+    "environment_versions_at_generation": {
+      "generator": "chatgpt",
+      "source": "GitHub connector",
+      "generated_at": "2026-07-05T12:31:00+09:00",
+      "schema_source": "ordinal-aitech/ai-orchestrator/schemas/task.schema.json"
     },
-    {
-      "type": "installer_executable",
-      "path": "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp_0.1.0_x64-setup.exe",
-      "required": true
-    },
-    {
-      "type": "installer_executable_alias",
-      "path": "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp-setup.exe",
-      "required": false,
-      "note": "If this alias is not generated automatically, report that fact. Do not invent success."
-    }
-  ],
-  "verification": [
-    "Confirm each required output file exists.",
-    "Record file size and last modified timestamp for each generated executable.",
-    "If possible, run the executable only far enough to confirm process startup; do not perform broad manual UI testing in this task.",
-    "Do not run the installer unless explicitly allowed by the human operator during this task."
-  ],
-  "stop_conditions": [
-    "Required build tool is missing and cannot be installed without human action.",
-    "npm install fails.",
-    "npm run build fails.",
-    "npm run tauri build fails.",
-    "Installer output is not generated after a successful build.",
-    "Any step requires administrator permission or external credential approval."
-  ],
-  "report": {
-    "output_path": "report.json",
-    "required_fields": [
-      "task_id",
-      "status",
-      "started_at",
-      "finished_at",
-      "commands_run",
-      "environment",
-      "outputs",
-      "errors",
-      "human_action_required",
-      "notes"
+    "completion_conditions": [
+      "implementation_completed",
+      "tests_completed",
+      "report_created",
+      "all_completion_conditions_confirmed"
     ],
-    "status_values": [
-      "success",
-      "failed",
-      "blocked"
-    ]
+    "completion_rule": "Do not mark this task complete until the build/installer generation result has been verified and reported."
+  },
+  "project": {
+    "project_id": "OpenMouseGesture",
+    "repository": "ordinal-aitech/OpenMouseGesture",
+    "local_path": "C:\\GitHub\\OpenMouseGesture",
+    "runtime_path": "C:\\GitHub\\OpenMouseGesture\\runtime"
   }
 }
