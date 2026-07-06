@@ -1,7 +1,7 @@
 {
   "task_id": "agent-20260707-open-mouse-gesture-rebuild-retry-002",
   "status": "failed",
-  "summary": "git_sync pull_before_run failed: git pull --ff-only failed: From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.",
+  "summary": "git_sync pull_before_run failed: working tree has uncommitted changes and allow_dirty_before_pull is false",
   "execution_agent_requested": "codex",
   "execution_mode": "local_command",
   "project": {
@@ -11,27 +11,16 @@
     "runtime_path": "C:\\GitHub\\open-mouse-gesture\\runtime"
   },
   "git_sync": {
-    "enabled": true,
-    "pull_before_run": {
-      "attempted": true,
-      "success": false,
-      "stdout": "",
-      "stderr": "From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
-      "diverged": true
-    }
+    "enabled": true
   },
   "result": {},
   "execution_time": "0.000s",
   "error": {
-    "code": "GIT_CONFLICT",
-    "message": "git pull --ff-only failed: From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.",
+    "code": "GIT_DIRTY_WORKTREE",
+    "message": "working tree has uncommitted changes and allow_dirty_before_pull is false",
     "retryable": false,
     "detail": {
-      "attempted": true,
-      "success": false,
-      "stdout": "",
-      "stderr": "From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
-      "diverged": true
+      "working_directory": "C:\\GitHub\\open-mouse-gesture"
     }
   }
 }
