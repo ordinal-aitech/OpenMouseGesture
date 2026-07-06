@@ -1,33 +1,67 @@
 {
-  "task_id": "agent-20260705-open-mouse-gesture-build-installer-retry-001",
-  "status": "fail",
-  "payload": {
-    "action": "agent_task",
-    "execution_agent": "codex",
-    "execution_provider": "codex_cli",
-    "working_directory": "C:\\GitHub\\open-mouse-gesture",
-    "timeout_seconds": 3600,
-    "instruction": "You are running under AI Orchestrator as a minimal-output Codex CLI worker. Read docs/codex-handoff-spec.md, docs/progress-log.md, docs/build-environment-setup.md, artifacts/run-tauri-build.cmd, source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/package.json, and source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/tauri.conf.json. Do only this task: build GestureHotkeyApp and generate the Windows NSIS installer. Use C:\\GitHub\\open-mouse-gesture as the repository root and source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 as the app working directory. Run npm install if needed, then npm run build, then npm run tauri build or cmd /c C:\\GitHub\\open-mouse-gesture\\artifacts\\run-tauri-build.cmd if the Visual Studio Build Tools environment is required. Verify these outputs: source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/GestureHotkeyApp.exe and source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp_0.1.0_x64-setup.exe. If source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp-setup.exe exists, report it too; if it does not exist, say so. Do not redesign or refactor application code. Do not enable action label overlay. Do not upload installers to GitHub Releases or external services. Do not commit generated target/ output unless explicitly instructed later. Do not run the installer unless a human explicitly permits it during this task. Final output should be concise and include success/failed/blocked, commands run, generated file paths, file sizes, timestamps, errors if any, and whether human action is required."
-  },
-  "metadata": {
-    "environment_versions_at_generation": {
-      "generator": "chatgpt",
-      "source": "GitHub connector",
-      "generated_at": "2026-07-05T13:24:00+09:00",
-      "schema_source": "ordinal-aitech/ai-orchestrator/schemas/task.schema.json"
-    },
-    "completion_conditions": [
-      "implementation_completed",
-      "tests_completed",
-      "report_created",
-      "all_completion_conditions_confirmed"
-    ],
-    "completion_rule": "Do not mark this task complete until the build/installer generation result has been verified and reported."
-  },
-  "project": {
-    "project_id": "open-mouse-gesture",
-    "repository": "ordinal-aitech/open-mouse-gesture",
-    "local_path": "C:\\GitHub\\open-mouse-gesture",
-    "runtime_path": "C:\\GitHub\\open-mouse-gesture\\runtime"
-  }
+  "task_id": "agent-20260707-open-mouse-gesture-resume-baseline-001",
+  "title": "Resume Open Mouse Gesture development baseline check",
+  "bootstrap_instructions": [
+    "Read ai-executor/AGENTS.md before starting work.",
+    "Read ai-executor/AI_ORCHESTRATOR_RUNTIME.md because this task is executed via AI Orchestrator runtime JSON.",
+    "Read the target repository docs in this order: README.md, docs/codex-handoff-spec.md, docs/progress-log.md, docs/test-result-summary.md, docs/openmousegesture-mod-plan.md.",
+    "If a referenced file cannot be read, do not infer its contents. Record the unreadable file in runtime/report.json."
+  ],
+  "purpose": "Restart the interrupted GestureHotkeyApp / OpenMouseGesture development safely and establish a verified baseline for the next implementation step while also testing AI Orchestrator operation on this repository.",
+  "background": "The project is the OpenMouseGesture-based GestureHotkeyApp. Current main work directory is source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/. A previous runtime task failed before execution because git_sync pull_before_run failed with: fatal: Cannot fast-forward to multiple branches. Do not rewind or reuse the failed request. This is a new task. The current handoff document says the next priorities are build verification, Config.groups + Action.group_id UI behavior, group rename UX, action group move UI, export/import verification, and installer naming/final placement checks.",
+  "scope": "In scope: inspect repository state, confirm the local checkout can be synchronized safely, verify build baseline, and report the next concrete development task. If the build fails because of a small local source/config issue, apply the minimal fix required to restore the baseline. Out of scope: broad redesign, unrelated refactoring, action label overlay re-enablement, release publication, installer execution, destructive git operations, and changing common/shared rule repositories.",
+  "target_files": [
+    "README.md",
+    "docs/codex-handoff-spec.md",
+    "docs/progress-log.md",
+    "docs/test-result-summary.md",
+    "docs/openmousegesture-mod-plan.md",
+    "docs/build-environment-setup.md",
+    "artifacts/run-tauri-build.cmd",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/package.json",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/tauri.conf.json",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/types/index.ts",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/components/actions/ActionList.tsx",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/components/actions/ActionEditor.tsx",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/store/useStore.ts",
+    "runtime/progress.json",
+    "runtime/report.json"
+  ],
+  "constraints": [
+    "Do not perform destructive git operations such as reset --hard, clean -fd, force push, or branch deletion.",
+    "Do not run the installer unless a human explicitly permits it during this task.",
+    "Do not upload artifacts to GitHub Releases or any external service.",
+    "Do not commit generated target/ or installer outputs unless explicitly instructed later.",
+    "Do not re-enable action label overlay. It is intentionally disabled due to prior freezes and cursor/trajectory issues.",
+    "Do not make broad UI redesigns or unrelated refactors.",
+    "If local git synchronization is blocked, stop before code changes and report the exact local state and safe recovery options.",
+    "Keep output concise. Record details in runtime/report.json rather than long chat-style narration."
+  ],
+  "required_changes": [
+    "Inspect local git state and identify whether the previous git pull failure still blocks execution.",
+    "If synchronization can be completed safely without destructive operations, synchronize the local checkout with the repository default branch.",
+    "Run the project baseline build from source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 using npm install if needed, npm run build, and npm run tauri build or artifacts/run-tauri-build.cmd when the Visual Studio Build Tools environment is required.",
+    "Verify whether GestureHotkeyApp.exe and the NSIS installer are generated at the expected paths.",
+    "Confirm whether the current codebase is ready for the next development step around grouped action UI behavior and action group movement.",
+    "Only if the build fails due to a small source/config issue inside the declared target area, apply a minimal fix and rerun the relevant build command."
+  ],
+  "validation": [
+    "Record commands run and their pass/fail result.",
+    "Verify npm run build result.",
+    "Verify npm run tauri build or run-tauri-build.cmd result.",
+    "Check for source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/GestureHotkeyApp.exe.",
+    "Check for source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp_0.1.0_x64-setup.exe.",
+    "If source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp-setup.exe exists, report it; if not, explicitly report that it does not exist.",
+    "Separate verified results from unverified items."
+  ],
+  "completion_criteria": [
+    "runtime/report.json is updated with success, failed, or blocked status.",
+    "Git synchronization status is clearly reported.",
+    "Build/installer baseline is either verified or the blocker is clearly identified.",
+    "Any changed source/config files are listed explicitly.",
+    "Unverified items and next recommended task are listed explicitly.",
+    "No destructive git operation, release upload, installer execution, or overlay re-enablement was performed."
+  ],
+  "reporting_requirements": "Write a concise runtime/report.json including: task_id, status, summary, git_sync result, commands run, files changed, validation results, generated artifact paths with file sizes/timestamps if available, unverified items, blockers, and recommended next task. Also update runtime/progress.json as appropriate during execution.",
+  "notes": "Current repository lacks PROJECT.md, CHANGELOG.md, docs/runtime-json-contract.md, and AGENTS.md. Treat docs/codex-handoff-spec.md plus README.md and progress/test docs as the current project handoff source, but report missing project-level正本 files as notes rather than inventing them."
 }
