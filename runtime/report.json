@@ -1,7 +1,7 @@
 {
   "task_id": "agent-20260705-open-mouse-gesture-build-installer-retry-001",
   "status": "failed",
-  "summary": "git_sync pull_before_run failed: working tree has uncommitted changes and allow_dirty_before_pull is false",
+  "summary": "git_sync pull_before_run failed: git pull --ff-only failed: fatal: unable to access 'https://github.com/ordinal-aitech/open-mouse-gesture.git/': Could not resolve host: github.com",
   "execution_agent_requested": "codex",
   "execution_mode": "local_command",
   "project": {
@@ -11,16 +11,27 @@
     "runtime_path": "C:\\GitHub\\open-mouse-gesture\\runtime"
   },
   "git_sync": {
-    "enabled": true
+    "enabled": true,
+    "pull_before_run": {
+      "attempted": true,
+      "success": false,
+      "stdout": "",
+      "stderr": "fatal: unable to access 'https://github.com/ordinal-aitech/open-mouse-gesture.git/': Could not resolve host: github.com\n",
+      "diverged": false
+    }
   },
   "result": {},
   "execution_time": "0.000s",
   "error": {
-    "code": "GIT_DIRTY_WORKTREE",
-    "message": "working tree has uncommitted changes and allow_dirty_before_pull is false",
+    "code": "GIT_PULL_FAILED",
+    "message": "git pull --ff-only failed: fatal: unable to access 'https://github.com/ordinal-aitech/open-mouse-gesture.git/': Could not resolve host: github.com",
     "retryable": false,
     "detail": {
-      "working_directory": "C:\\GitHub\\open-mouse-gesture"
+      "attempted": true,
+      "success": false,
+      "stdout": "",
+      "stderr": "fatal: unable to access 'https://github.com/ordinal-aitech/open-mouse-gesture.git/': Could not resolve host: github.com\n",
+      "diverged": false
     }
   }
 }
