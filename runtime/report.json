@@ -1,26 +1,19 @@
 {
-  "task_id": "agent-20260707-open-mouse-gesture-rebuild-retry-002",
-  "status": "failed",
-  "summary": "git_sync pull_before_run failed: working tree has uncommitted changes and allow_dirty_before_pull is false",
-  "execution_agent_requested": "codex",
-  "execution_mode": "local_command",
+  "task_id": "agent-20260707-open-mouse-gesture-unified-trigger-capture-001",
+  "status": "pending",
+  "summary": "Unified trigger capture implementation request is ready. Execution has not started yet.",
+  "files_changed": [],
+  "validation_results": [],
+  "unverified_items": [
+    "AI Orchestrator runner has not executed this task yet.",
+    "Unified mouse/keyboard trigger capture is not implemented yet.",
+    "Build validation is not run yet."
+  ],
+  "blockers": [],
   "project": {
     "project_id": "open-mouse-gesture",
     "repository": "ordinal-aitech/open-mouse-gesture",
     "local_path": "C:\\GitHub\\open-mouse-gesture",
     "runtime_path": "C:\\GitHub\\open-mouse-gesture\\runtime"
-  },
-  "git_sync": {
-    "enabled": true
-  },
-  "result": {},
-  "execution_time": "0.000s",
-  "error": {
-    "code": "GIT_DIRTY_WORKTREE",
-    "message": "working tree has uncommitted changes and allow_dirty_before_pull is false",
-    "retryable": false,
-    "detail": {
-      "working_directory": "C:\\GitHub\\open-mouse-gesture"
-    }
   }
 }
