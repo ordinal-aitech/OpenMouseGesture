@@ -1,51 +1,11 @@
 {
-  "task_id": "agent-20260707-open-mouse-gesture-rebuild-retry-002",
-<<<<<<< HEAD
-  "state": "completed",
-  "progress": 100,
-  "blocker": null,
-  "error": null,
-  "environment_versions": {
-    "recorded_at": "2026-07-06T19:27:23.816033+00:00",
-    "schema": {
-      "task_schema_version": "1.0",
-      "report_schema_version": "1.0",
-      "progress_schema_version": "1.0"
-    },
-    "components": {
-      "task_generator_version": "0.1.0",
-      "runner_version": "0.1.0",
-      "execution_agent_version": "0.1.0",
-      "executor_core_version": "0.1.0"
-    },
-    "python": {
-      "version": "3.12.10",
-      "implementation": "CPython"
-    },
-    "os": {
-      "system": "Windows",
-      "release": "11",
-      "machine": "AMD64"
-    },
-    "encoding": {
-      "pythonioencoding": null,
-      "pythonutf8": null
-    },
-    "task_generation": {
-      "generator": "chatgpt",
-      "source": "GitHub connector",
-      "generated_at": "2026-07-07T04:27:00+09:00",
-      "schema_source": "ordinal-aitech/ai-orchestrator/schemas/request.schema.json"
-    }
-  },
-=======
+  "task_id": "agent-20260707-open-mouse-gesture-unified-trigger-capture-001",
   "state": "ready",
   "progress": 0,
-  "current_step": "Waiting for AI Orchestrator runner to execute rebuild retry after environment setup.",
+  "current_step": "Waiting for AI Orchestrator runner to execute unified trigger capture implementation task.",
   "blocker": null,
   "error": null,
-  "updated_at": "2026-07-07T04:27:00+09:00",
->>>>>>> 9e8f3e7c5bbc12fc2b580ee7af23598d89c503a3
+  "updated_at": "2026-07-07T07:15:00+09:00",
   "project": {
     "project_id": "open-mouse-gesture",
     "repository": "ordinal-aitech/open-mouse-gesture",
