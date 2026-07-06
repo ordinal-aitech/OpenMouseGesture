@@ -1,17 +1,22 @@
 {
   "task_id": "agent-20260707-open-mouse-gesture-resume-baseline-001",
-  "title": "Resume Open Mouse Gesture development baseline check",
+  "title": "Resume and normalize Open Mouse Gesture repository for AI Orchestrator operation",
   "bootstrap_instructions": [
     "Read ai-executor/AGENTS.md before starting work.",
     "Read ai-executor/AI_ORCHESTRATOR_RUNTIME.md because this task is executed via AI Orchestrator runtime JSON.",
     "Read the target repository docs in this order: README.md, docs/codex-handoff-spec.md, docs/progress-log.md, docs/test-result-summary.md, docs/openmousegesture-mod-plan.md.",
+    "Search the repository for any other handoff, TASK, task, report, progress, Codex, Claude, or instruction documents before changing structure.",
     "If a referenced file cannot be read, do not infer its contents. Record the unreadable file in runtime/report.json."
   ],
-  "purpose": "Restart the interrupted GestureHotkeyApp / OpenMouseGesture development safely and establish a verified baseline for the next implementation step while also testing AI Orchestrator operation on this repository.",
-  "background": "The project is the OpenMouseGesture-based GestureHotkeyApp. Current main work directory is source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/. A previous runtime task failed before execution because git_sync pull_before_run failed with: fatal: Cannot fast-forward to multiple branches. Do not rewind or reuse the failed request. This is a new task. The current handoff document says the next priorities are build verification, Config.groups + Action.group_id UI behavior, group rename UX, action group move UI, export/import verification, and installer naming/final placement checks.",
-  "scope": "In scope: inspect repository state, confirm the local checkout can be synchronized safely, verify build baseline, and report the next concrete development task. If the build fails because of a small local source/config issue, apply the minimal fix required to restore the baseline. Out of scope: broad redesign, unrelated refactoring, action label overlay re-enablement, release publication, installer execution, destructive git operations, and changing common/shared rule repositories.",
+  "purpose": "Restart the interrupted GestureHotkeyApp / OpenMouseGesture development, identify the handoff instruction document, and bring the repository closer to the current AI Orchestrator operating structure without destructive cleanup.",
+  "background": "This repository was originally a non-GitHub working folder gathered into GitHub later, before the current AI Orchestrator operation was established. Its file layout may be inconsistent or cluttered. A previous runtime task failed before execution because git_sync pull_before_run failed with: fatal: Cannot fast-forward to multiple branches. Do not rewind or reuse the failed request. This is a new task. Known handoff candidate: docs/codex-handoff-spec.md. That document states that the current main work directory is source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/ and that legacy/GestureHotkeyApp-Wpf/ is reference-only. Current next priorities include build verification, Config.groups + Action.group_id UI behavior, group rename UX, action group move UI, export/import verification, and installer naming/final placement checks.",
+  "scope": "In scope: repository inventory, handoff document discovery, current-operations normalization, project-level Markdown additions if missing, runtime JSON hygiene, build baseline verification, and a safe next-task recommendation. If small source/config fixes are required to restore the build baseline, they may be made within the declared target area. Out of scope: destructive deletion, large file moves, history rewriting, broad redesign, unrelated refactoring, action label overlay re-enablement, release publication, installer execution, and edits to ai-common/ai-skills/ai-knowledge/ai-executor.",
   "target_files": [
     "README.md",
+    "PROJECT.md",
+    "CHANGELOG.md",
+    "AGENTS.md",
+    "docs/runtime-json-contract.md",
     "docs/codex-handoff-spec.md",
     "docs/progress-log.md",
     "docs/test-result-summary.md",
@@ -24,11 +29,14 @@
     "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/components/actions/ActionList.tsx",
     "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/components/actions/ActionEditor.tsx",
     "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/store/useStore.ts",
+    "runtime/request.json",
+    "runtime/task.json",
     "runtime/progress.json",
     "runtime/report.json"
   ],
   "constraints": [
-    "Do not perform destructive git operations such as reset --hard, clean -fd, force push, or branch deletion.",
+    "Do not perform destructive git operations such as reset --hard, clean -fd, force push, branch deletion, or unreviewed mass deletion.",
+    "Do not move or delete legacy/ or release/source folders during this task. If reorganization is needed, propose a plan first in runtime/report.json.",
     "Do not run the installer unless a human explicitly permits it during this task.",
     "Do not upload artifacts to GitHub Releases or any external service.",
     "Do not commit generated target/ or installer outputs unless explicitly instructed later.",
@@ -39,6 +47,13 @@
   ],
   "required_changes": [
     "Inspect local git state and identify whether the previous git pull failure still blocks execution.",
+    "Search for handoff/instruction documents. Confirm docs/codex-handoff-spec.md and list any additional candidates found.",
+    "Inventory the top-level repository structure and classify directories/files as current source, release/reference, docs, artifacts, legacy, runtime, or unknown.",
+    "If PROJECT.md is missing, create a concise PROJECT.md that states the current project purpose, active work directory, current source of truth, implemented state, intentionally disabled features, and next priorities.",
+    "If CHANGELOG.md is missing, create a concise CHANGELOG.md seeded from docs/progress-log.md at a summary level. Do not duplicate the full progress log.",
+    "If AGENTS.md is missing, create a minimal project-level AGENTS.md for execution agents that points to ai-executor rules, identifies the active work directory, and warns not to mix legacy WPF work into the current OpenMouseGesture line.",
+    "If docs/runtime-json-contract.md is missing, either create a small project-local note pointing to ai-orchestrator runtime JSON roles or report why it should remain centralized. Do not invent a conflicting schema.",
+    "Normalize runtime/progress.json and runtime/report.json for this new task_id so stale failed results from the previous task are not mistaken for current output.",
     "If synchronization can be completed safely without destructive operations, synchronize the local checkout with the repository default branch.",
     "Run the project baseline build from source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 using npm install if needed, npm run build, and npm run tauri build or artifacts/run-tauri-build.cmd when the Visual Studio Build Tools environment is required.",
     "Verify whether GestureHotkeyApp.exe and the NSIS installer are generated at the expected paths.",
@@ -47,21 +62,25 @@
   ],
   "validation": [
     "Record commands run and their pass/fail result.",
-    "Verify npm run build result.",
-    "Verify npm run tauri build or run-tauri-build.cmd result.",
+    "List handoff/instruction documents found and identify the primary handoff document.",
+    "List repository normalization changes made, especially PROJECT.md, CHANGELOG.md, AGENTS.md, docs/runtime-json-contract.md, runtime/progress.json, and runtime/report.json.",
+    "Verify npm run build result if execution reaches build stage.",
+    "Verify npm run tauri build or run-tauri-build.cmd result if execution reaches Tauri build stage.",
     "Check for source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/GestureHotkeyApp.exe.",
     "Check for source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp_0.1.0_x64-setup.exe.",
     "If source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp-setup.exe exists, report it; if not, explicitly report that it does not exist.",
     "Separate verified results from unverified items."
   ],
   "completion_criteria": [
-    "runtime/report.json is updated with success, failed, or blocked status.",
+    "runtime/report.json is updated with success, failed, or blocked status for this task_id.",
+    "Primary handoff instruction document is identified.",
+    "Repository structure has either been minimally normalized or a safe normalization plan is reported.",
     "Git synchronization status is clearly reported.",
     "Build/installer baseline is either verified or the blocker is clearly identified.",
-    "Any changed source/config files are listed explicitly.",
+    "Any changed files are listed explicitly.",
     "Unverified items and next recommended task are listed explicitly.",
     "No destructive git operation, release upload, installer execution, or overlay re-enablement was performed."
   ],
-  "reporting_requirements": "Write a concise runtime/report.json including: task_id, status, summary, git_sync result, commands run, files changed, validation results, generated artifact paths with file sizes/timestamps if available, unverified items, blockers, and recommended next task. Also update runtime/progress.json as appropriate during execution.",
-  "notes": "Current repository lacks PROJECT.md, CHANGELOG.md, docs/runtime-json-contract.md, and AGENTS.md. Treat docs/codex-handoff-spec.md plus README.md and progress/test docs as the current project handoff source, but report missing project-level正本 files as notes rather than inventing them."
+  "reporting_requirements": "Write a concise runtime/report.json including: task_id, status, summary, primary handoff document, additional handoff candidates, repository structure inventory, normalization changes, git_sync result, commands run, files changed, validation results, generated artifact paths with file sizes/timestamps if available, unverified items, blockers, and recommended next task. Also update runtime/progress.json as appropriate during execution.",
+  "notes": "This task intentionally treats docs/codex-handoff-spec.md as the known handoff candidate, but the agent must still search for other handoff/instruction files. Do not delete clutter during this task. Prefer adding current-operation entrypoint files and reporting a safe cleanup plan."
 }
