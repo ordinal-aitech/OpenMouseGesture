@@ -1,0 +1,39 @@
+{
+  "request_id": "req-20260707-open-mouse-gesture-resume-baseline-001",
+  "task_id": "agent-20260707-open-mouse-gesture-resume-baseline-001",
+  "status": "ready",
+  "payload": {
+    "action": "agent_task",
+    "execution_agent": "codex",
+    "execution_provider": "codex_cli",
+    "working_directory": "C:\\GitHub\\open-mouse-gesture",
+    "instruction": "Read runtime/task.json and execute only the task described there. Follow bootstrap_instructions before making changes. Keep output concise and write final results to runtime/report.json.",
+    "timeout_seconds": 3600
+  },
+  "created_at": "2026-07-07T03:00:00+09:00",
+  "updated_at": "2026-07-07T03:00:00+09:00",
+  "started_at": null,
+  "finished_at": null,
+  "error_summary": null,
+  "metadata": {
+    "environment_versions_at_generation": {
+      "generator": "chatgpt",
+      "source": "GitHub connector",
+      "generated_at": "2026-07-07T03:00:00+09:00",
+      "schema_source": "ordinal-aitech/ai-orchestrator/schemas/request.schema.json"
+    },
+    "completion_conditions": [
+      "git_sync_checked",
+      "baseline_build_checked",
+      "report_created",
+      "all_completion_conditions_confirmed"
+    ],
+    "completion_rule": "Do not mark this request success until runtime/task.json completion_criteria are satisfied and runtime/report.json is updated."
+  },
+  "project": {
+    "project_id": "open-mouse-gesture",
+    "repository": "ordinal-aitech/open-mouse-gesture",
+    "local_path": "C:\\GitHub\\open-mouse-gesture",
+    "runtime_path": "C:\\GitHub\\open-mouse-gesture\\runtime"
+  }
+}
