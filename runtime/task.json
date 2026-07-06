@@ -1,67 +1,57 @@
 {
-  "task_id": "agent-20260707-open-mouse-gesture-unified-trigger-capture-001",
-  "title": "Implement unified mouse and keyboard trigger capture",
+  "task_id": "agent-20260707-open-mouse-gesture-rebuild-unified-trigger-001",
+  "title": "Rebuild GestureHotkeyApp after unified trigger capture implementation",
   "bootstrap_instructions": [
     "Read ai-executor/AGENTS.md before starting work if available.",
     "Read ai-executor/AI_ORCHESTRATOR_RUNTIME.md because this task is executed via AI Orchestrator runtime JSON if available.",
-    "Read the target repository docs in this order: README.md, docs/codex-handoff-spec.md, docs/progress-log.md, docs/test-result-summary.md, docs/openmousegesture-mod-plan.md.",
+    "Read README.md and docs/codex-handoff-spec.md before running build commands.",
     "Use source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 as the active source directory.",
-    "If any referenced file cannot be read, do not infer its contents. Record it in runtime/report.json."
+    "Do not infer unreadable files. Record unreadable files in runtime/report.json."
   ],
-  "purpose": "Make GestureHotkeyApp practical for real mouse-gesture use by replacing fixed mouse-only trigger selection with a unified trigger capture model that can register actual mouse buttons or keyboard key combinations as Trigger A/B/C.",
-  "background": "The app currently limits trigger selection to mouse buttons such as left, right, middle, X1, and X2. The user's side buttons do not appear to work reliably as X1/X2. The user can assign keyboard shortcuts to mouse buttons in the mouse vendor app, so the app should allow registering inputs such as Shift+F1 as gesture triggers. The preferred UX is: press a capture/register button, then press the actual desired mouse button or keyboard combination, and store/display that input consistently. The existing app build succeeded previously and the app is generally functional, so this task should focus narrowly on trigger capture and trigger handling.",
-  "scope": "In scope: Trigger A/B/C configuration UI, input capture for mouse buttons and keyboard combinations, persistence/migration of trigger config, backend event detection, left-click warning, validation/build. Out of scope: action label overlay re-enablement, broad UI redesign, unrelated gesture/action features, installer naming changes, group/action move features, export/import redesign, release upload, and destructive repository cleanup.",
+  "purpose": "Build the latest pushed main branch containing Unified Trigger Capture so the user can test the new Trigger A/B/C input capture behavior with a fresh GestureHotkeyApp.exe.",
+  "background": "Unified Trigger Capture was implemented and pushed to origin/main as commit b695482 feat: implement unified mouse and keyboard trigger capture. The existing local GestureHotkeyApp.exe may be from before that implementation. The immediate need is not additional feature work, but to pull the latest source, rebuild, and report the exact fresh executable and installer paths, sizes, and timestamps for user testing.",
+  "scope": "In scope: safe git sync, verify latest commit includes b695482 or successor containing unified trigger capture, run build commands, regenerate exe and installer, report paths. Out of scope: new feature implementation, broad refactoring, installer execution, release upload, action label overlay re-enablement, and manual GUI testing beyond optional launch/smoke checks if already safe.",
   "target_files": [
-    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/",
-    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src/",
-    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/package.json",
-    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/Cargo.toml",
-    "docs/codex-handoff-spec.md",
-    "docs/progress-log.md",
-    "docs/test-result-summary.md",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/GestureHotkeyApp.exe",
+    "source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/bundle/nsis/GestureHotkeyApp_0.1.0_x64-setup.exe",
     "runtime/progress.json",
     "runtime/report.json"
   ],
   "constraints": [
     "Do not perform destructive git operations such as reset --hard, clean -fd, force push, branch deletion, or unreviewed mass deletion.",
-    "Do not move or delete legacy, release, source archive, or generated target folders during this task.",
-    "Do not re-enable action label overlay. It is intentionally disabled due to prior freezes and cursor/trajectory issues.",
-    "Do not run the installer unless explicitly permitted by the human.",
-    "Do not commit or upload generated target/ outputs unless explicitly instructed later.",
-    "Keep the task focused on trigger input capture and trigger handling.",
-    "Preserve existing mouse trigger behavior and migrate existing settings where possible.",
-    "If git synchronization is blocked by local uncommitted files, record exact status and stop before risky source changes. Do not discard local changes."
+    "Do not run the installer unless the human explicitly permits it.",
+    "Do not upload artifacts to GitHub Releases or external services.",
+    "Do not commit generated target/ outputs unless explicitly instructed later.",
+    "Do not re-enable action label overlay.",
+    "Do not make additional feature changes unless the build is blocked by a minimal fix clearly required for compilation.",
+    "If the working tree is dirty before pull, stop and report exact files rather than discarding changes."
   ],
   "required_changes": [
-    "Inspect current trigger configuration model and UI for Trigger A/B/C.",
-    "Design and implement a unified trigger data model that can represent mouse buttons and keyboard combinations. Suggested shape: kind=mouse with button, or kind=keyboard with key and modifiers. Keep backward compatibility with existing mouse trigger settings.",
-    "Replace or augment fixed trigger dropdowns with a capture/register interaction: the user clicks a record button for Trigger A/B/C, then presses the desired mouse button or keyboard combination, and the app stores the detected input.",
-    "Display captured triggers in a human-readable form such as Mouse Right, Mouse Middle, Mouse X1, Shift + F1, Ctrl + Alt + K, F13.",
-    "Support capturing mouse inputs: left, right, middle, X1, X2 where available.",
-    "Support capturing keyboard inputs with modifiers: Shift, Ctrl, Alt, and ordinary keys / function keys as delivered by Windows.",
-    "When Mouse Left is captured as a trigger, show a warning that left click may conflict with normal operation. Do not forbid it unless implementation constraints require it.",
-    "Use captured trigger inputs to start and end gesture recognition consistently for Trigger A/B/C.",
-    "If practical in the current architecture, add an option to suppress/consume registered keyboard trigger input so it is not passed to other applications. If not practical for this iteration, document the limitation and leave the feature off rather than implementing a risky partial solution.",
-    "Do not require F13-F24 specifically. If the mouse vendor app sends Shift+F1, the app should be able to capture and use Shift+F1 as the trigger.",
-    "Update docs/progress-log.md and/or docs/codex-handoff-spec.md with the implemented trigger behavior and any limitations."
+    "Check git status before pull.",
+    "Pull or fast-forward to origin/main safely.",
+    "Confirm the local history includes b695482 or a later commit containing feat: implement unified mouse and keyboard trigger capture.",
+    "From source-v1.0.1/7-rate-OpenMouseGesture-b8f5357, run npm run build.",
+    "Run npm run tauri build or the existing build helper if needed for Visual Studio Build Tools environment.",
+    "Verify fresh GestureHotkeyApp.exe exists and record full path, size, and LastWriteTime.",
+    "Verify fresh NSIS installer exists and record full path, size, and LastWriteTime.",
+    "Report whether GestureHotkeyApp-setup.exe exists or not.",
+    "Do not perform manual GUI validation unless it is safe and does not require installer execution. If GUI validation is not done, mark it unverified."
   ],
   "validation": [
-    "Run npm run build in source-v1.0.1/7-rate-OpenMouseGesture-b8f5357.",
-    "Run npm run tauri build or the existing build helper if needed.",
-    "Verify the app can still build successfully after changes.",
-    "If runtime/manual GUI verification is possible, verify capture/display for Mouse Right, Mouse Middle, and at least one keyboard combination such as Shift+F1.",
-    "Verify existing configs with old mouse trigger values do not break on load.",
-    "Verify Mouse Left trigger capture shows a warning.",
-    "Record which items were actually verified and which remain unverified."
+    "git status --short is checked before and after build.",
+    "npm run build result is recorded.",
+    "npm run tauri build or build helper result is recorded.",
+    "Fresh generated executable path, size, and timestamp are recorded.",
+    "Fresh generated installer path, size, and timestamp are recorded.",
+    "runtime/report.json is updated with success, failed, or blocked status."
   ],
   "completion_criteria": [
-    "Trigger A/B/C can store and display unified mouse or keyboard trigger inputs.",
-    "Keyboard combinations such as Shift+F1 can be used as gesture triggers, subject to actual Windows input events received.",
-    "Existing mouse trigger behavior remains functional or is safely migrated.",
-    "Left-click trigger warning exists.",
-    "Build validation is complete or blockers are clearly reported.",
-    "runtime/report.json is updated with status, files changed, validation results, unverified items, blockers, and next recommended step."
+    "A fresh build using the latest unified trigger capture source has completed successfully, or a blocker is clearly identified.",
+    "The user can identify which GestureHotkeyApp.exe to run for testing.",
+    "Generated artifact paths, sizes, and timestamps are reported.",
+    "No destructive git operation, installer execution, release upload, or unrelated source change was performed."
   ],
-  "reporting_requirements": "Write a concise runtime/report.json including task_id, status, summary, files changed, data model changes, UI changes, trigger capture behavior, input suppression status, validation commands/results, generated artifact paths if rebuilt, unverified items, blockers, and next recommended step.",
-  "notes": "The user explicitly wants this task before broader feature work because the app is not practical for real use until trigger keys can be assigned flexibly. Avoid asking the user to perform repeated command-line checks. Use the local execution environment for validation where possible."
+  "reporting_requirements": "Write runtime/report.json with task_id, status, summary, git status, latest commit checked, commands run, build results, generated exe path/size/timestamp, generated installer path/size/timestamp, files changed, unverified items, blockers, and next recommended user test.",
+  "notes": "The user is waiting to test the new trigger capture behavior. The most important output is the exact path to the freshly rebuilt GestureHotkeyApp.exe."
 }
