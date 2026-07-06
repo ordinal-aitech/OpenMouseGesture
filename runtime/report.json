@@ -1,7 +1,7 @@
 {
   "task_id": "agent-20260707-open-mouse-gesture-rebuild-unified-trigger-001",
   "status": "failed",
-  "summary": "git_sync pull_before_run failed: git pull --ff-only failed: From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\n   d2dce25..c283deb  main       -> origin/main\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.",
+  "summary": "git_sync pull_before_run failed: git pull --ff-only failed: From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.",
   "execution_agent_requested": "codex",
   "execution_mode": "local_command",
   "project": {
@@ -16,7 +16,7 @@
       "attempted": true,
       "success": false,
       "stdout": "",
-      "stderr": "From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\n   d2dce25..c283deb  main       -> origin/main\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
+      "stderr": "From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
       "diverged": true
     }
   },
@@ -24,13 +24,13 @@
   "execution_time": "0.000s",
   "error": {
     "code": "GIT_CONFLICT",
-    "message": "git pull --ff-only failed: From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\n   d2dce25..c283deb  main       -> origin/main\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.",
+    "message": "git pull --ff-only failed: From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.",
     "retryable": false,
     "detail": {
       "attempted": true,
       "success": false,
       "stdout": "",
-      "stderr": "From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\n   d2dce25..c283deb  main       -> origin/main\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
+      "stderr": "From https://github.com/ordinal-aitech/open-mouse-gesture\n * branch            main       -> FETCH_HEAD\nhint: Diverging branches can't be fast-forwarded, you need to either:\nhint:\nhint: \tgit merge --no-ff\nhint:\nhint: or:\nhint:\nhint: \tgit rebase\nhint:\nhint: Disable this message with \"git config set advice.diverging false\"\nfatal: Not possible to fast-forward, aborting.\n",
       "diverged": true
     }
   }
