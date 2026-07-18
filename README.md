@@ -1,11 +1,41 @@
 # OpenMouseGesture Workspace
 
-このリポジトリ配下に、今回の作業で使っていたファイル一式を集約しました。
+このリポジトリには、OpenMouseGestureの現行ソース、仕様書、設計・検証記録、配布用ビルド手順を集約している。
+
+## 現在の正本
+
+- プロジェクト仕様書: `PROJECT.md`
+- 変更履歴: `CHANGELOG.md`
+- 現行ソース: `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/`
+- 設計・検証・過去の作業記録: `docs/`
+- 配布物の受け渡し先: `dist/windows/`
+
+`PROJECT.md` は現在の実装仕様をまとめた正本である。`docs/` 内の旧計画・進捗記録と内容が異なる場合は、現行コード、`PROJECT.md`、`CHANGELOG.md` を優先する。
+
+## 現在の状態
+
+2026年7月18日時点で、以下を実装・確認済みである。
+
+- Tauri 2 + React + TypeScript + RustによるWindowsアプリ
+- トレイ常駐とグローバルマウス／キーボードフック
+- Trigger A / B / Cによるジェスチャー実行
+- 左クリックをジェスチャー開始トリガーとして拒否する多層安全対策
+- 通常の右クリックを維持する短クリック・パススルー
+- 軌跡描画の安定化
+- カスタムジェスチャー／アクション設定の保存
+- デフォルト上書き前の設定バックアップ
+- 21件のカスタムアクション復元
+- 最新インストーラーによる上書き導入
+- 実機での基本ジェスチャー動作確認
+
+当面は通常利用しながら継続テストする段階であり、現在判明している必須修正はない。
+
+既存設定由来で、表示名と実際のアクション割り当てが一致していない項目が残る可能性はある。例として「全画面化」という名称が内部では最小化に割り当てられている設定があるため、実利用で問題になった場合は設定内容を個別に修正する。
 
 ## 主な配置
 
 - `source-v1.0.1/`
-  - OpenMouseGesture 改造元ソース
+  - OpenMouseGesture改造元ソース
   - 実装変更の主対象
 - `release-v1.0.1/`
   - 元の配布物
@@ -20,40 +50,34 @@
   - アイコン確認用画像
   - 旧試作の出力物
 - `legacy/GestureHotkeyApp-Wpf/`
-  - 以前の .NET 8 / WPF 試作版
-  - `GestureHotkeyApp.sln`
-  - `src/`
-  - 当時の README
+  - 以前の .NET 8 / WPF試作版
+  - 参照用であり、現行実装ではない
 
-## いまの基準
+## 配布物 (`dist/windows/`)
 
-- 現在の改修対象は `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/`
-- 設計書と検証記録は `docs/`
-- 旧 WPF 試作は参照用として `legacy/` に隔離
+最新のインストーラーと実行ファイルは、深いTauriビルド出力パスを直接たどらず、リポジトリ直下の `dist/windows/` から取得する。
 
-## 配布物 (dist/windows/)
+生成手順:
 
-最新のインストーラーと実行ファイルは、深い Tauri のビルド出力パス
-(`source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/...`)
-を直接たどらなくても、リポジトリ直下の `dist/windows/` から取得できます。
-
-1. `cd source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 && npm run tauri build` でリリースビルドを作成する
-2. リポジトリ直下に戻り `npm run dist:windows` を実行する
+1. `cd source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 && npm run tauri build`
+2. リポジトリ直下へ戻り `npm run dist:windows`
 
 `dist/windows/` に生成されるもの:
 
-- `OpenMouseGesture-x64.exe` — リリースビルドの実行ファイル
-- `OpenMouseGesture-Setup-x64.exe` — NSIS インストーラー
-- `SHA256SUMS.txt` — 上記2ファイルの SHA-256
-- `build-info.json` — バージョン、ビルド日時、コミットSHA、各成果物のハッシュ
+- `OpenMouseGesture-x64.exe` — リリース実行ファイル
+- `OpenMouseGesture-Setup-x64.exe` — NSISインストーラー
+- `SHA256SUMS.txt` — 配布物のSHA-256
+- `build-info.json` — バージョン、ビルド日時、commit SHA、各成果物のハッシュ
 
-`dist/windows/` の中身（`.exe` とメタデータ）は Git 管理対象外です。詳細は `dist/README.md` を参照してください。
+`dist/windows/` の `.exe` と生成メタデータはGit管理対象外である。詳細は `dist/README.md` を参照する。
 
-## 補足
+## 仕様・検証を確認する順序
 
-- `docs/progress-log.md`
-- `docs/test-result-summary.md`
-- `docs/openmousegesture-mod-plan.md`
-- `docs/codex-handoff-spec.md`
+1. `PROJECT.md`
+2. `CHANGELOG.md`
+3. 現行ソースとテスト
+4. `docs/test-result-summary.md`
+5. `docs/progress-log.md`
+6. `docs/openmousegesture-mod-plan.md` や `docs/codex-handoff-spec.md` などの過去資料
 
-あたりを開くと、ここまでの流れを追いやすいです。
+過去資料は経緯確認には使えるが、現行仕様の正本として扱わない。
