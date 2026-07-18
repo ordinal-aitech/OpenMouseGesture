@@ -1,0 +1,10 @@
+{
+  "name": "open-mouse-gesture-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Repository-level scripts for OpenMouseGesture (see source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/ for the app itself).",
+  "scripts": {
+    "dist:windows": "node scripts/dist-windows.mjs",
+    "test:dist": "node --test scripts/*.test.mjs"
+  }
+}

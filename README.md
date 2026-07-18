@@ -31,6 +31,24 @@
 - 設計書と検証記録は `docs/`
 - 旧 WPF 試作は参照用として `legacy/` に隔離
 
+## 配布物 (dist/windows/)
+
+最新のインストーラーと実行ファイルは、深い Tauri のビルド出力パス
+(`source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/target/release/...`)
+を直接たどらなくても、リポジトリ直下の `dist/windows/` から取得できます。
+
+1. `cd source-v1.0.1/7-rate-OpenMouseGesture-b8f5357 && npm run tauri build` でリリースビルドを作成する
+2. リポジトリ直下に戻り `npm run dist:windows` を実行する
+
+`dist/windows/` に生成されるもの:
+
+- `OpenMouseGesture-x64.exe` — リリースビルドの実行ファイル
+- `OpenMouseGesture-Setup-x64.exe` — NSIS インストーラー
+- `SHA256SUMS.txt` — 上記2ファイルの SHA-256
+- `build-info.json` — バージョン、ビルド日時、コミットSHA、各成果物のハッシュ
+
+`dist/windows/` の中身（`.exe` とメタデータ）は Git 管理対象外です。詳細は `dist/README.md` を参照してください。
+
 ## 補足
 
 - `docs/progress-log.md`

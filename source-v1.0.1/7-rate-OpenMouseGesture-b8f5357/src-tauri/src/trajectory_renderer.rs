@@ -5,7 +5,9 @@
 // 実装詳細:
 //   - WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST でクリックスルー可能な透明ウィンドウ
 //   - UpdateLayeredWindow + ARGB32ビットマップでアルファチャンネル制御
-//   - メモリDC上でGDI描画し、背景α=0、軌跡α=255で明示的に管理
+//   - グロー(外側/低不透明度) → ボディ(中間) → コア(明るいハイライト)の3層を
+//     それぞれ丸線端/丸結合のジオメトリックペンで別バッファに描画し、
+//     各レイヤーのカバレッジからプリマルチプライ済みARGBを合成する
 //   - 別スレッドでウィンドウメッセージループを実行
 
 use std::sync::Mutex;
@@ -23,24 +25,94 @@ static WINDOW_SIZE: Mutex<(i32, i32)> = Mutex::new((0, 0));
 static WINDOW_POS: Mutex<(i32, i32)> = Mutex::new((0, 0));
 static MEMORY_DC: Mutex<Option<isize>> = Mutex::new(None);
 static MEMORY_BITMAP: Mutex<Option<isize>> = Mutex::new(None);
+static MASK_DC_GLOW: Mutex<Option<isize>> = Mutex::new(None);
+static MASK_BITMAP_GLOW: Mutex<Option<isize>> = Mutex::new(None);
+static MASK_DC_BODY: Mutex<Option<isize>> = Mutex::new(None);
+static MASK_BITMAP_BODY: Mutex<Option<isize>> = Mutex::new(None);
+static MASK_DC_CORE: Mutex<Option<isize>> = Mutex::new(None);
+static MASK_BITMAP_CORE: Mutex<Option<isize>> = Mutex::new(None);
 static LAST_RENDER_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 static TRAJECTORY_BOUNDS: Mutex<Option<RECT>> = Mutex::new(None);
 static PREVIOUS_BOUNDS: Mutex<Option<RECT>> = Mutex::new(None);
 static ACTIVE_LINE_COLOR: Mutex<u32> = Mutex::new(0x004F4DFF);
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("OpenMouseGestureTrajectory");
-const LINE_WIDTH: i32 = 3;
-const BOUNDS_MARGIN: i32 = LINE_WIDTH * 2 + 10;
+
+// 旧実装の単色フラットライン(幅3, 完全不透明)に対する新レイヤー幅。
+// コア/ボディは旧幅の約3倍、グローはさらに外側に広く低不透明度で伸びる。
+const CORE_WIDTH: i32 = 4;
+const BODY_WIDTH: i32 = 9;
+const GLOW_WIDTH: i32 = 16;
+const CORE_ALPHA: u8 = 235;
+const BODY_ALPHA: u8 = 175;
+const GLOW_ALPHA: u8 = 60;
+const BOUNDS_MARGIN: i32 = GLOW_WIDTH + 10;
 const WM_UPDATE_TRAJECTORY: u32 = WM_USER + 1;
 const MIN_FRAME_INTERVAL_MS: u64 = 16;
+
+unsafe fn clear_dc(dc: HDC, width: i32, height: i32) {
+    let _ = PatBlt(dc, 0, 0, width, height, BLACKNESS);
+}
 
 unsafe fn clear_memory_dc() {
     let mem_dc_opt = MEMORY_DC.lock().unwrap();
     if let Some(mem_dc_val) = *mem_dc_opt {
         let mem_dc = HDC(mem_dc_val as *mut _);
         let (width, height) = *WINDOW_SIZE.lock().unwrap();
-        let _ = PatBlt(mem_dc, 0, 0, width, height, BLACKNESS);
+        clear_dc(mem_dc, width, height);
     }
+}
+
+// 指定サイズのARGB32 DIBセクションを作成し、compatible DCに選択する
+unsafe fn create_sized_dib(compat_dc: HDC, width: i32, height: i32) -> (HDC, HBITMAP) {
+    let dc = CreateCompatibleDC(Some(compat_dc));
+
+    let bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            biSizeImage: 0,
+            biXPelsPerMeter: 0,
+            biYPelsPerMeter: 0,
+            biClrUsed: 0,
+            biClrImportant: 0,
+        },
+        bmiColors: [RGBQUAD::default(); 1],
+    };
+    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+    let dib = CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
+    let old = SelectObject(dc, dib.into());
+    if !old.0.is_null() {
+        let _ = DeleteObject(old);
+    }
+    (dc, dib)
+}
+
+unsafe fn realloc_dib_slot(
+    dc_slot: &Mutex<Option<isize>>,
+    bitmap_slot: &Mutex<Option<isize>>,
+    compat_dc: HDC,
+    width: i32,
+    height: i32,
+) {
+    {
+        let dc_opt = *dc_slot.lock().unwrap();
+        let bitmap_opt = *bitmap_slot.lock().unwrap();
+        if let Some(bitmap_val) = bitmap_opt {
+            let _ = DeleteObject(HGDIOBJ(bitmap_val as *mut _));
+        }
+        if let Some(dc_val) = dc_opt {
+            let _ = DeleteDC(HDC(dc_val as *mut _));
+        }
+    }
+
+    let (dc, bitmap) = create_sized_dib(compat_dc, width, height);
+    *dc_slot.lock().unwrap() = Some(dc.0 as isize);
+    *bitmap_slot.lock().unwrap() = Some(bitmap.0 as isize);
 }
 
 // 軌跡のバウンディングにウィンドウとDIBを合わせる（スナップショット版）
@@ -50,10 +122,6 @@ unsafe fn ensure_window_matches_bounds_with_snapshot(hwnd: HWND, snapshot_bounds
         let top = r.top;
         let w = (r.right - r.left).max(1);
         let h = (r.bottom - r.top).max(1);
-        eprintln!(
-            "[ENSURE_SNAP] bounds=({},{})~({},{}) -> window pos=({},{}) size={}x{}",
-            r.left, r.top, r.right, r.bottom, left, top, w, h
-        );
 
         // 現在のウィンドウ情報
         let (cur_w, cur_h) = *WINDOW_SIZE.lock().unwrap();
@@ -66,40 +134,11 @@ unsafe fn ensure_window_matches_bounds_with_snapshot(hwnd: HWND, snapshot_bounds
             let mem_dc_val_opt = *MEMORY_DC.lock().unwrap();
             if let Some(mem_dc_val) = mem_dc_val_opt {
                 let mem_dc = HDC(mem_dc_val as *mut _);
+                realloc_dib_slot(&MEMORY_DC, &MEMORY_BITMAP, mem_dc, w, h);
+                realloc_dib_slot(&MASK_DC_GLOW, &MASK_BITMAP_GLOW, mem_dc, w, h);
+                realloc_dib_slot(&MASK_DC_BODY, &MASK_BITMAP_BODY, mem_dc, w, h);
+                realloc_dib_slot(&MASK_DC_CORE, &MASK_BITMAP_CORE, mem_dc, w, h);
 
-                // 新しいDIBを作成
-                let bmi = BITMAPINFO {
-                    bmiHeader: BITMAPINFOHEADER {
-                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                        biWidth: w,
-                        biHeight: -h,
-                        biPlanes: 1,
-                        biBitCount: 32,
-                        biCompression: BI_RGB.0,
-                        biSizeImage: 0,
-                        biXPelsPerMeter: 0,
-                        biYPelsPerMeter: 0,
-                        biClrUsed: 0,
-                        biClrImportant: 0,
-                    },
-                    bmiColors: [RGBQUAD::default(); 1],
-                };
-                let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-                let new_dib =
-                    CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0)
-                        .unwrap();
-
-                // 新しいDIBを選択、古いものを破棄
-                let old = SelectObject(mem_dc, new_dib.into());
-                if !old.0.is_null() {
-                    let _ = DeleteObject(old);
-                }
-
-                // 保存
-                {
-                    let mut mem_bmp = MEMORY_BITMAP.lock().unwrap();
-                    *mem_bmp = Some(new_dib.0 as isize);
-                }
                 {
                     let mut size = WINDOW_SIZE.lock().unwrap();
                     *size = (w, h);
@@ -110,10 +149,6 @@ unsafe fn ensure_window_matches_bounds_with_snapshot(hwnd: HWND, snapshot_bounds
         }
 
         if need_move || need_realloc {
-            eprintln!(
-                "[ENSURE_SNAP] SetWindowPos: ({},{}) {}x{} (realloc={}, move={})",
-                left, top, w, h, need_realloc, need_move
-            );
             let _ = SetWindowPos(
                 hwnd,
                 Some(HWND_TOPMOST),
@@ -136,107 +171,61 @@ unsafe fn ensure_window_matches_bounds_with_snapshot(hwnd: HWND, snapshot_bounds
     }
 }
 
-unsafe fn render_to_memory_dc_with_snapshot(
-    snapshot_bounds: Option<RECT>,
-    snapshot_points: Vec<(i32, i32)>,
-) {
-    let (offset_x, offset_y) = if let Some(rect) = snapshot_bounds {
-        eprintln!(
-            "[RENDER_SNAP] bounds=({},{})~({},{}) -> offset=({},{})",
-            rect.left, rect.top, rect.right, rect.bottom, rect.left, rect.top
-        );
-        (rect.left, rect.top)
-    } else {
-        eprintln!("[RENDER_SNAP] No bounds, using offset=(0,0)");
-        (0, 0)
+// 指定幅・丸線端/丸結合のジオメトリックペンで折れ線を白色描画する（カバレッジマスク用）
+unsafe fn draw_stroke_mask(dc: HDC, width: i32, width_px: i32, height_px: i32, points: &[(i32, i32)], offset: (i32, i32)) {
+    clear_dc(dc, width_px, height_px);
+
+    let brush = LOGBRUSH {
+        lbStyle: BS_SOLID,
+        lbColor: COLORREF(0x00FFFFFF),
+        lbHatch: 0,
     };
-    eprintln!(
-        "[RENDER_SNAP] will draw {} points with offset=({},{})",
-        snapshot_points.len(),
-        offset_x,
-        offset_y
+    let pen = ExtCreatePen(
+        PEN_STYLE(PS_GEOMETRIC.0 | PS_SOLID.0 | PS_ENDCAP_ROUND.0 | PS_JOIN_ROUND.0),
+        width.max(1) as u32,
+        &brush,
+        None,
     );
-    let (width, height) = *WINDOW_SIZE.lock().unwrap();
+    let old_pen = SelectObject(dc, pen.into());
+    let _ = SetBkMode(dc, TRANSPARENT);
 
-    let mem_dc_opt = MEMORY_DC.lock().unwrap();
-    if let Some(mem_dc_val) = *mem_dc_opt {
-        let mem_dc = HDC(mem_dc_val as *mut _);
-        let _ = PatBlt(mem_dc, 0, 0, width, height, BLACKNESS);
-
-        if snapshot_points.len() >= 2 {
-            let pen = CreatePen(
-                PS_SOLID,
-                LINE_WIDTH,
-                COLORREF(*ACTIVE_LINE_COLOR.lock().unwrap()),
-            );
-            let old_pen = SelectObject(mem_dc, pen.into());
-
-            let _ = SetBkMode(mem_dc, TRANSPARENT);
-            let _ = SetROP2(mem_dc, R2_COPYPEN);
-
-            let _ = MoveToEx(
-                mem_dc,
-                snapshot_points[0].0 - offset_x,
-                snapshot_points[0].1 - offset_y,
-                None,
-            );
-            for i in 1..snapshot_points.len() {
-                let _ = LineTo(
-                    mem_dc,
-                    snapshot_points[i].0 - offset_x,
-                    snapshot_points[i].1 - offset_y,
-                );
-            }
-
-            SelectObject(mem_dc, old_pen);
-            let _ = DeleteObject(pen.into());
-            fix_alpha_channel(mem_dc, offset_x, offset_y, &snapshot_points);
-        }
+    let _ = MoveToEx(dc, points[0].0 - offset.0, points[0].1 - offset.1, None);
+    for i in 1..points.len() {
+        let _ = LineTo(dc, points[i].0 - offset.0, points[i].1 - offset.1);
     }
+
+    SelectObject(dc, old_pen);
+    let _ = DeleteObject(pen.into());
 }
 
-unsafe fn fix_alpha_channel(
-    mem_dc: HDC,
-    offset_x: i32,
-    offset_y: i32,
-    snapshot_points: &[(i32, i32)],
-) {
-    let bitmap = HBITMAP((*MEMORY_BITMAP.lock().unwrap()).unwrap() as *mut _);
-    let (width, height) = *WINDOW_SIZE.lock().unwrap();
+fn rgb_from_colorref(colorref: u32) -> (u8, u8, u8) {
+    let r = (colorref & 0xFF) as u8;
+    let g = ((colorref >> 8) & 0xFF) as u8;
+    let b = ((colorref >> 16) & 0xFF) as u8;
+    (r, g, b)
+}
 
-    if snapshot_points.is_empty() {
-        return;
-    }
+fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
+    (a as f32 + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
+}
 
-    eprintln!(
-        "[FIX_ALPHA] offset=({},{}) {} points",
-        offset_x,
-        offset_y,
-        snapshot_points.len()
+// ベース色から、コア(白寄りの明るいハイライト)とグロー(僅かに沈めた外光)の色相を導出する
+fn derive_shades(base: (u8, u8, u8)) -> ((u8, u8, u8), (u8, u8, u8), (u8, u8, u8)) {
+    let core = (
+        lerp_u8(base.0, 255, 0.45),
+        lerp_u8(base.1, 255, 0.45),
+        lerp_u8(base.2, 255, 0.45),
     );
-    let mut min_x = i32::MAX;
-    let mut min_y = i32::MAX;
-    let mut max_x = i32::MIN;
-    let mut max_y = i32::MIN;
+    let body = base;
+    let glow = (
+        lerp_u8(base.0, 0, 0.10),
+        lerp_u8(base.1, 0, 0.10),
+        lerp_u8(base.2, 0, 0.10),
+    );
+    (core, body, glow)
+}
 
-    for &(x, y) in snapshot_points.iter() {
-        let local_x = x - offset_x;
-        let local_y = y - offset_y;
-        min_x = min_x.min(local_x - BOUNDS_MARGIN);
-        min_y = min_y.min(local_y - BOUNDS_MARGIN);
-        max_x = max_x.max(local_x + BOUNDS_MARGIN);
-        max_y = max_y.max(local_y + BOUNDS_MARGIN);
-    }
-
-    min_x = min_x.max(0);
-    min_y = min_y.max(0);
-    max_x = max_x.min(width - 1);
-    max_y = max_y.min(height - 1);
-
-    if min_x >= max_x || min_y >= max_y {
-        return;
-    }
-
+unsafe fn get_mask_bits(dc: HDC, bitmap: HBITMAP, width: i32, height: i32) -> Vec<u8> {
     let mut bits = vec![0u8; (width * height * 4) as usize];
     let mut bmi = BITMAPINFO {
         bmiHeader: BITMAPINFOHEADER {
@@ -250,9 +239,8 @@ unsafe fn fix_alpha_channel(
         },
         bmiColors: [RGBQUAD::default(); 1],
     };
-
     let _ = GetDIBits(
-        mem_dc,
+        dc,
         bitmap,
         0,
         height as u32,
@@ -260,28 +248,156 @@ unsafe fn fix_alpha_channel(
         &mut bmi,
         DIB_RGB_COLORS,
     );
+    bits
+}
 
-    for y in min_y..=max_y {
-        for x in min_x..=max_x {
-            let offset = ((y * width + x) * 4) as usize;
-            let b = bits[offset];
-            let g = bits[offset + 1];
-            let r = bits[offset + 2];
+unsafe fn render_to_memory_dc_with_snapshot(
+    snapshot_bounds: Option<RECT>,
+    snapshot_points: Vec<(i32, i32)>,
+) {
+    let (offset_x, offset_y) = if let Some(rect) = snapshot_bounds {
+        (rect.left, rect.top)
+    } else {
+        (0, 0)
+    };
+    let (width, height) = *WINDOW_SIZE.lock().unwrap();
 
-            if r > 0 || g > 0 || b > 0 {
-                bits[offset + 3] = 255;
-            } else {
-                bits[offset + 3] = 0;
+    let mem_dc_opt = *MEMORY_DC.lock().unwrap();
+    let mem_bitmap_opt = *MEMORY_BITMAP.lock().unwrap();
+    let glow_dc_opt = *MASK_DC_GLOW.lock().unwrap();
+    let glow_bmp_opt = *MASK_BITMAP_GLOW.lock().unwrap();
+    let body_dc_opt = *MASK_DC_BODY.lock().unwrap();
+    let body_bmp_opt = *MASK_BITMAP_BODY.lock().unwrap();
+    let core_dc_opt = *MASK_DC_CORE.lock().unwrap();
+    let core_bmp_opt = *MASK_BITMAP_CORE.lock().unwrap();
+
+    let (
+        Some(mem_dc_val),
+        Some(mem_bitmap_val),
+        Some(glow_dc_val),
+        Some(glow_bmp_val),
+        Some(body_dc_val),
+        Some(body_bmp_val),
+        Some(core_dc_val),
+        Some(core_bmp_val),
+    ) = (
+        mem_dc_opt,
+        mem_bitmap_opt,
+        glow_dc_opt,
+        glow_bmp_opt,
+        body_dc_opt,
+        body_bmp_opt,
+        core_dc_opt,
+        core_bmp_opt,
+    )
+    else {
+        return;
+    };
+
+    let mem_dc = HDC(mem_dc_val as *mut _);
+    let mem_bitmap = HBITMAP(mem_bitmap_val as *mut _);
+    clear_dc(mem_dc, width, height);
+
+    if snapshot_points.len() < 2 {
+        // 点が無い場合は全面透明のまま。既にゼロクリア済みなので追加処理は不要。
+        let mut bits = vec![0u8; (width * height * 4) as usize];
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width,
+                biHeight: -height,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            bmiColors: [RGBQUAD::default(); 1],
+        };
+        bits.fill(0);
+        let _ = SetDIBits(Some(mem_dc), mem_bitmap, 0, height as u32, bits.as_ptr() as *const _, &bmi, DIB_RGB_COLORS);
+        return;
+    }
+
+    let glow_dc = HDC(glow_dc_val as *mut _);
+    let glow_bitmap = HBITMAP(glow_bmp_val as *mut _);
+    let body_dc = HDC(body_dc_val as *mut _);
+    let body_bitmap = HBITMAP(body_bmp_val as *mut _);
+    let core_dc = HDC(core_dc_val as *mut _);
+    let core_bitmap = HBITMAP(core_bmp_val as *mut _);
+
+    let offset = (offset_x, offset_y);
+    draw_stroke_mask(glow_dc, GLOW_WIDTH, width, height, &snapshot_points, offset);
+    draw_stroke_mask(body_dc, BODY_WIDTH, width, height, &snapshot_points, offset);
+    draw_stroke_mask(core_dc, CORE_WIDTH, width, height, &snapshot_points, offset);
+
+    let glow_bits = get_mask_bits(glow_dc, glow_bitmap, width, height);
+    let body_bits = get_mask_bits(body_dc, body_bitmap, width, height);
+    let core_bits = get_mask_bits(core_dc, core_bitmap, width, height);
+
+    let base_color = rgb_from_colorref(*ACTIVE_LINE_COLOR.lock().unwrap());
+    let (core_color, body_color, glow_color) = derive_shades(base_color);
+
+    let mut min_x = i32::MAX;
+    let mut min_y = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut max_y = i32::MIN;
+    for &(x, y) in snapshot_points.iter() {
+        let local_x = x - offset_x;
+        let local_y = y - offset_y;
+        min_x = min_x.min(local_x - BOUNDS_MARGIN);
+        min_y = min_y.min(local_y - BOUNDS_MARGIN);
+        max_x = max_x.max(local_x + BOUNDS_MARGIN);
+        max_y = max_y.max(local_y + BOUNDS_MARGIN);
+    }
+    min_x = min_x.max(0);
+    min_y = min_y.max(0);
+    max_x = max_x.min(width - 1);
+    max_y = max_y.min(height - 1);
+
+    let mut out_bits = vec![0u8; (width * height * 4) as usize];
+    if min_x < max_x && min_y < max_y {
+        for y in min_y..=max_y {
+            for x in min_x..=max_x {
+                let idx = ((y * width + x) * 4) as usize;
+
+                let (color, alpha) = if core_bits[idx] > 0 || core_bits[idx + 1] > 0 || core_bits[idx + 2] > 0 {
+                    (core_color, CORE_ALPHA)
+                } else if body_bits[idx] > 0 || body_bits[idx + 1] > 0 || body_bits[idx + 2] > 0 {
+                    (body_color, BODY_ALPHA)
+                } else if glow_bits[idx] > 0 || glow_bits[idx + 1] > 0 || glow_bits[idx + 2] > 0 {
+                    (glow_color, GLOW_ALPHA)
+                } else {
+                    continue;
+                };
+
+                // レイヤードウィンドウ(ULW_ALPHA/AC_SRC_ALPHA)はプリマルチプライ済みアルファを要求する
+                let a = alpha as f32 / 255.0;
+                out_bits[idx] = (color.2 as f32 * a).round() as u8; // B
+                out_bits[idx + 1] = (color.1 as f32 * a).round() as u8; // G
+                out_bits[idx + 2] = (color.0 as f32 * a).round() as u8; // R
+                out_bits[idx + 3] = alpha; // A
             }
         }
     }
 
+    let mut bmi = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: BI_RGB.0,
+            ..Default::default()
+        },
+        bmiColors: [RGBQUAD::default(); 1],
+    };
     let _ = SetDIBits(
         Some(mem_dc),
-        bitmap,
+        mem_bitmap,
         0,
         height as u32,
-        bits.as_ptr() as *const _,
+        out_bits.as_ptr() as *const _,
         &bmi,
         DIB_RGB_COLORS,
     );
@@ -300,10 +416,6 @@ unsafe fn update_layered_window_from_memory(hwnd: HWND) {
             };
             let pt_src = POINT { x: 0, y: 0 };
             let pt_dst = POINT { x: win_x, y: win_y };
-            eprintln!(
-                "[UPDATE_LW] dst=({},{}) size={}x{} src=(0,0)",
-                win_x, win_y, win_w, win_h
-            );
             let blend = BLENDFUNCTION {
                 BlendOp: AC_SRC_OVER as u8,
                 BlendFlags: 0,
@@ -347,11 +459,6 @@ unsafe extern "system" fn window_proc(
                     let points = TRAJECTORY_POINTS.lock().unwrap();
                     (bounds.clone(), points.clone())
                 };
-                eprintln!(
-                    "[WM_UPDATE] snapshot: bounds={:?}, points={}",
-                    snapshot_bounds,
-                    snapshot_points.len()
-                );
 
                 ensure_window_matches_bounds_with_snapshot(hwnd, snapshot_bounds.clone());
                 render_to_memory_dc_with_snapshot(snapshot_bounds, snapshot_points);
@@ -365,14 +472,20 @@ unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_DESTROY => {
-            let mem_dc_opt = MEMORY_DC.lock().unwrap();
-            let mem_bitmap_opt = MEMORY_BITMAP.lock().unwrap();
-
-            if let Some(bitmap) = *mem_bitmap_opt {
-                let _ = DeleteObject(HGDIOBJ(bitmap as *mut _));
-            }
-            if let Some(dc) = *mem_dc_opt {
-                let _ = DeleteDC(HDC(dc as *mut _));
+            for (dc_slot, bitmap_slot) in [
+                (&MEMORY_DC, &MEMORY_BITMAP),
+                (&MASK_DC_GLOW, &MASK_BITMAP_GLOW),
+                (&MASK_DC_BODY, &MASK_BITMAP_BODY),
+                (&MASK_DC_CORE, &MASK_BITMAP_CORE),
+            ] {
+                let bitmap_opt = bitmap_slot.lock().unwrap();
+                let dc_opt = dc_slot.lock().unwrap();
+                if let Some(bitmap) = *bitmap_opt {
+                    let _ = DeleteObject(HGDIOBJ(bitmap as *mut _));
+                }
+                if let Some(dc) = *dc_opt {
+                    let _ = DeleteDC(HDC(dc as *mut _));
+                }
             }
 
             PostQuitMessage(0);
@@ -446,39 +559,27 @@ pub fn init_renderer() -> Result<()> {
         }
 
         let screen_dc = GetDC(None);
-        let mem_dc = CreateCompatibleDC(Some(screen_dc));
-
-        let bmi = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: 1,
-                biHeight: -1,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: BI_RGB.0,
-                biSizeImage: 0,
-                biXPelsPerMeter: 0,
-                biYPelsPerMeter: 0,
-                biClrUsed: 0,
-                biClrImportant: 0,
-            },
-            bmiColors: [RGBQUAD::default(); 1],
-        };
-
-        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let dib = CreateDIBSection(Some(mem_dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0).unwrap();
-
-        let _ = SelectObject(mem_dc, dib.into());
+        let (mem_dc, mem_bitmap) = create_sized_dib(screen_dc, 1, 1);
+        let (glow_dc, glow_bitmap) = create_sized_dib(screen_dc, 1, 1);
+        let (body_dc, body_bitmap) = create_sized_dib(screen_dc, 1, 1);
+        let (core_dc, core_bitmap) = create_sized_dib(screen_dc, 1, 1);
         let _ = ReleaseDC(None, screen_dc);
 
         {
             let mut memory_dc = MEMORY_DC.lock().unwrap();
             *memory_dc = Some(mem_dc.0 as isize);
         }
-
         {
             let mut memory_bitmap = MEMORY_BITMAP.lock().unwrap();
-            *memory_bitmap = Some(dib.0 as isize);
+            *memory_bitmap = Some(mem_bitmap.0 as isize);
+        }
+        {
+            *MASK_DC_GLOW.lock().unwrap() = Some(glow_dc.0 as isize);
+            *MASK_BITMAP_GLOW.lock().unwrap() = Some(glow_bitmap.0 as isize);
+            *MASK_DC_BODY.lock().unwrap() = Some(body_dc.0 as isize);
+            *MASK_BITMAP_BODY.lock().unwrap() = Some(body_bitmap.0 as isize);
+            *MASK_DC_CORE.lock().unwrap() = Some(core_dc.0 as isize);
+            *MASK_BITMAP_CORE.lock().unwrap() = Some(core_bitmap.0 as isize);
         }
 
         clear_memory_dc();
@@ -593,24 +694,10 @@ pub fn append_trajectory_point(x: i32, y: i32) {
         let mut bounds = TRAJECTORY_BOUNDS.lock().unwrap();
 
         if let Some(ref mut rect) = *bounds {
-            let old_bounds = rect.clone();
             rect.left = rect.left.min(x - BOUNDS_MARGIN);
             rect.top = rect.top.min(y - BOUNDS_MARGIN);
             rect.right = rect.right.max(x + BOUNDS_MARGIN);
             rect.bottom = rect.bottom.max(y + BOUNDS_MARGIN);
-            eprintln!(
-                "[APPEND] point=({},{}) bounds: ({},{})~({},{}) -> ({},{})~({},{})",
-                x,
-                y,
-                old_bounds.left,
-                old_bounds.top,
-                old_bounds.right,
-                old_bounds.bottom,
-                rect.left,
-                rect.top,
-                rect.right,
-                rect.bottom
-            );
         } else {
             *bounds = Some(RECT {
                 left: x - BOUNDS_MARGIN,
@@ -618,15 +705,6 @@ pub fn append_trajectory_point(x: i32, y: i32) {
                 right: x + BOUNDS_MARGIN,
                 bottom: y + BOUNDS_MARGIN,
             });
-            eprintln!(
-                "[APPEND] point=({},{}) initial bounds: ({},{})~({},{})",
-                x,
-                y,
-                x - BOUNDS_MARGIN,
-                y - BOUNDS_MARGIN,
-                x + BOUNDS_MARGIN,
-                y + BOUNDS_MARGIN
-            );
         }
     }
 
@@ -690,5 +768,42 @@ pub fn set_active_color(hex_color: &str) {
         let b = rgb & 0xFF;
         let colorref = (b << 16) | (g << 8) | r;
         *ACTIVE_LINE_COLOR.lock().unwrap() = colorref;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rgb_from_colorref_roundtrips_hex() {
+        // set_active_color("#FF4D4F") -> COLORREF 0x004F4DFF
+        let (r, g, b) = rgb_from_colorref(0x004F4DFF);
+        assert_eq!((r, g, b), (0xFF, 0x4D, 0x4F));
+    }
+
+    #[test]
+    fn derive_shades_core_is_brighter_than_body() {
+        let base = (0xFFu8, 0x4Du8, 0x4Fu8);
+        let (core, body, glow) = derive_shades(base);
+        assert_eq!(body, base);
+        assert!(core.1 > body.1, "core should be lighter than body");
+        assert!(glow.1 <= body.1, "glow should not be brighter than body");
+    }
+
+    #[test]
+    fn layer_widths_are_at_least_three_times_old_line_width() {
+        const OLD_LINE_WIDTH: i32 = 3;
+        assert!(BODY_WIDTH >= OLD_LINE_WIDTH * 3 - 1);
+        assert!(GLOW_WIDTH > BODY_WIDTH);
+        assert!(CORE_WIDTH < BODY_WIDTH);
+    }
+
+    #[test]
+    fn layer_alphas_are_within_translucent_targets() {
+        assert!(GLOW_ALPHA < BODY_ALPHA);
+        assert!(BODY_ALPHA < CORE_ALPHA);
+        assert!((140..=205).contains(&(BODY_ALPHA as i32)));
+        assert!((204..=255).contains(&(CORE_ALPHA as i32)));
     }
 }
