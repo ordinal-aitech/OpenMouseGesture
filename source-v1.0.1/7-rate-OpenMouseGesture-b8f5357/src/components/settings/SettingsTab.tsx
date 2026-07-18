@@ -117,6 +117,10 @@ function getKeyboardKeyLabel(code: string, key: string) {
 }
 
 function formatTrigger(trigger: GestureTrigger) {
+  if (!trigger.trim()) {
+    return "Unassigned";
+  }
+
   const mouseButton = normalizeMouseTrigger(trigger);
   if (mouseButton) {
     return mouseButtonLabels[mouseButton];
@@ -330,6 +334,14 @@ export function SettingsTab() {
 
       event.preventDefault();
       event.stopPropagation();
+
+      if (button === "left") {
+        // Left click must never be registerable: it would swallow normal
+        // left-click interaction everywhere and lock the app up.
+        setError("Left click cannot be used as a trigger.");
+        return;
+      }
+
       applyCapturedTrigger(captureSlot, serializeMouseTrigger(button));
     };
 
@@ -342,6 +354,7 @@ export function SettingsTab() {
       if (event.key === "Escape" && !event.ctrlKey && !event.altKey && !event.shiftKey) {
         event.preventDefault();
         setCaptureSlot(null);
+        setError(null);
         return;
       }
 
@@ -468,7 +481,10 @@ export function SettingsTab() {
             color={triggerAColor}
             isCapturing={captureSlot === "A"}
             duplicateOf={null}
-            onStartCapture={() => setCaptureSlot("A")}
+            onStartCapture={() => {
+              setError(null);
+              setCaptureSlot("A");
+            }}
             onColorChange={(value) => {
               setTriggerAColor(value);
               void persistConfig({ triggerAColor: value });
@@ -481,7 +497,10 @@ export function SettingsTab() {
             color={triggerBColor}
             isCapturing={captureSlot === "B"}
             duplicateOf={duplicateOfB}
-            onStartCapture={() => setCaptureSlot("B")}
+            onStartCapture={() => {
+              setError(null);
+              setCaptureSlot("B");
+            }}
             onColorChange={(value) => {
               setTriggerBColor(value);
               void persistConfig({ triggerBColor: value });
@@ -494,7 +513,10 @@ export function SettingsTab() {
             color={triggerCColor}
             isCapturing={captureSlot === "C"}
             duplicateOf={duplicateOfC}
-            onStartCapture={() => setCaptureSlot("C")}
+            onStartCapture={() => {
+              setError(null);
+              setCaptureSlot("C");
+            }}
             onColorChange={(value) => {
               setTriggerCColor(value);
               void persistConfig({ triggerCColor: value });

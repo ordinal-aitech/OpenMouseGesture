@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 const APP_CONFIG_DIR_NAME: &str = "GestureHotkeyApp";
 const DEFAULT_GROUP_ID: &str = "group-uncategorized";
+const UNASSIGNED_TRIGGER: &str = "";
 const DEFAULT_GROUP_NAME: &str = "未分類";
 
 #[derive(Debug, Clone)]
@@ -130,15 +131,23 @@ fn default_trigger_button_x1() -> String {
     "mouse:x1".to_string()
 }
 
+/// 左クリックは通常操作と競合し操作不能ロックアウトを招くため、
+/// トリガーとして一切受け付けない（"left"/"mouse:left" は意図的に非対応）。
 fn normalize_mouse_trigger(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "left" | "mouse:left" => Some("left"),
         "right" | "mouse:right" => Some("right"),
         "middle" | "mouse:middle" => Some("middle"),
         "x1" | "mouse:x1" => Some("x1"),
         "x2" | "mouse:x2" => Some("x2"),
         _ => None,
     }
+}
+
+fn is_left_mouse_trigger(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "left" | "mouse:left"
+    )
 }
 
 fn normalize_trigger_modifier(value: &str) -> Option<&'static str> {
@@ -315,6 +324,14 @@ pub fn parse_keyboard_trigger(value: &str) -> Option<(Vec<String>, String)> {
 }
 
 pub fn normalize_trigger_binding(value: &str, default_value: &str) -> String {
+    if value.trim().is_empty() {
+        return UNASSIGNED_TRIGGER.to_string();
+    }
+
+    if is_left_mouse_trigger(value) {
+        return UNASSIGNED_TRIGGER.to_string();
+    }
+
     if let Some(button) = normalize_mouse_trigger(value) {
         return format!("mouse:{}", button);
     }
@@ -331,7 +348,9 @@ pub fn normalize_trigger_binding(value: &str, default_value: &str) -> String {
 }
 
 fn is_valid_trigger_binding(value: &str) -> bool {
-    normalize_mouse_trigger(value).is_some() || parse_keyboard_trigger(value).is_some()
+    value.trim().is_empty()
+        || normalize_mouse_trigger(value).is_some()
+        || parse_keyboard_trigger(value).is_some()
 }
 fn default_trigger_a_color() -> String {
     "#FF4D4F".to_string()
@@ -639,6 +658,70 @@ impl Config {
 
         Ok(())
     }
+
+    fn left_click_trigger_slots(&self) -> Vec<&'static str> {
+        let mut slots = Vec::new();
+        if is_left_mouse_trigger(&self.triggerA) {
+            slots.push("A");
+        }
+        if is_left_mouse_trigger(&self.triggerB) {
+            slots.push("B");
+        }
+        if is_left_mouse_trigger(&self.triggerC) {
+            slots.push("C");
+        }
+        slots
+    }
+}
+
+fn sanitize_left_click_triggers_in_raw_json(content: &str) -> (String, Vec<&'static str>) {
+    fn sanitize_slot(
+        content: &str,
+        key: &str,
+        slot: &'static str,
+    ) -> Option<(std::ops::Range<usize>, &'static str)> {
+        let key_pos = content.find(key)?;
+        let bytes = content.as_bytes();
+        let mut cursor = key_pos + key.len();
+
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] != b':' {
+            return None;
+        }
+        cursor += 1;
+
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor >= bytes.len() || bytes[cursor] != b'"' {
+            return None;
+        }
+
+        let value_start = cursor + 1;
+        let value_end = content[value_start..].find('"').map(|offset| value_start + offset)?;
+        if is_left_mouse_trigger(&content[value_start..value_end]) {
+            Some((value_start..value_end, slot))
+        } else {
+            None
+        }
+    }
+
+    let mut content = content.to_string();
+    let mut slots = Vec::new();
+    for (key, slot) in [
+        ("\"triggerA\"", "A"),
+        ("\"triggerB\"", "B"),
+        ("\"triggerC\"", "C"),
+    ] {
+        if let Some((range, slot_name)) = sanitize_slot(&content, key, slot) {
+            content.replace_range(range, UNASSIGNED_TRIGGER);
+            slots.push(slot_name);
+        }
+    }
+
+    (content, slots)
 }
 
 fn normalize_groups_and_actions(
@@ -814,9 +897,21 @@ impl ConfigManager {
 
         let content =
             fs::read_to_string(&path).map_err(|e| format!("Failed to read config.json: {}", e))?;
+        let (content, raw_left_click_slots) = sanitize_left_click_triggers_in_raw_json(&content);
+        if !raw_left_click_slots.is_empty() {
+            let backup_dir = self.backup_settings_files()?;
+            fs::write(&path, &content)
+                .map_err(|e| format!("Failed to rewrite sanitized config.json: {}", e))?;
+            eprintln!(
+                "[config] sanitized left-click trigger(s) in raw config.json: slots={} backup={}",
+                raw_left_click_slots.join(","),
+                backup_dir.display()
+            );
+        }
 
         let parsed: Config = serde_json::from_str(&content)
             .map_err(|e| format!("Failed to parse config.json: {}", e))?;
+        let left_click_slots = parsed.left_click_trigger_slots();
         let normalized = parsed.clone().normalized();
 
         if let Err(e) = normalized.validate() {
@@ -824,6 +919,14 @@ impl ConfigManager {
         }
 
         if normalized != parsed {
+            if !left_click_slots.is_empty() {
+                let backup_dir = self.backup_settings_files()?;
+                eprintln!(
+                    "[config] sanitized left-click trigger(s) in config.json: slots={} backup={}",
+                    left_click_slots.join(","),
+                    backup_dir.display()
+                );
+            }
             self.save_config(&normalized)?;
         }
 
@@ -831,6 +934,14 @@ impl ConfigManager {
     }
 
     pub fn save_config(&self, config: &Config) -> Result<(), String> {
+        let left_click_slots = config.left_click_trigger_slots();
+        if !left_click_slots.is_empty() {
+            return Err(format!(
+                "Left click cannot be used as a trigger. Invalid slots: {}",
+                left_click_slots.join(", ")
+            ));
+        }
+
         let normalized = config.clone().normalized();
         if let Err(e) = normalized.validate() {
             return Err(format!("config.json validation error: {}", e));
@@ -876,14 +987,54 @@ impl ConfigManager {
             }
         }
 
+        let sanitized_slots = bundle.config.left_click_trigger_slots();
         let normalized_config = bundle.config.normalized();
         if let Err(e) = normalized_config.validate() {
             return Err(format!("settings bundle config validation error: {}", e));
         }
 
+        if !sanitized_slots.is_empty() {
+            eprintln!(
+                "[config] sanitized left-click trigger(s) from imported settings bundle: slots={}",
+                sanitized_slots.join(",")
+            );
+        }
+
         self.save_gestures(&bundle.gestures)?;
         self.save_config(&normalized_config)?;
         Ok(())
+    }
+
+    fn backup_settings_files(&self) -> Result<PathBuf, String> {
+        let timestamp = chrono_like_backup_timestamp();
+        let mut backup_dir = self.config_dir.join(format!("backup-{}", timestamp));
+        let mut suffix = 1usize;
+        while backup_dir.exists() {
+            backup_dir = self
+                .config_dir
+                .join(format!("backup-{}-{}", timestamp, suffix));
+            suffix += 1;
+        }
+
+        fs::create_dir_all(&backup_dir)
+            .map_err(|e| format!("Failed to create backup directory: {}", e))?;
+
+        for file_name in ["config.json", "gestures.json"] {
+            let source = self.config_dir.join(file_name);
+            if source.exists() {
+                let target = backup_dir.join(file_name);
+                fs::copy(&source, &target).map_err(|e| {
+                    format!(
+                        "Failed to back up {} to {}: {}",
+                        source.display(),
+                        target.display(),
+                        e
+                    )
+                })?;
+            }
+        }
+
+        Ok(backup_dir)
     }
 }
 
@@ -893,6 +1044,61 @@ fn chrono_like_timestamp() -> String {
         Ok(duration) => format!("{}", duration.as_secs()),
         Err(_) => "0".to_string(),
     }
+}
+
+fn chrono_like_backup_timestamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[derive(Clone, Copy)]
+    struct DateTimeParts {
+        year: i32,
+        month: u32,
+        day: u32,
+        hour: u32,
+        minute: u32,
+        second: u32,
+    }
+
+    fn civil_from_days(days: i64) -> (i32, u32, u32) {
+        let z = days + 719_468;
+        let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+        let y = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = doy - (153 * mp + 2) / 5 + 1;
+        let month = mp + if mp < 10 { 3 } else { -9 };
+        let year = y + if month <= 2 { 1 } else { 0 };
+        (year as i32, month as u32, day as u32)
+    }
+
+    fn utc_parts_from_unix_seconds(unix_seconds: i64) -> DateTimeParts {
+        let days = unix_seconds.div_euclid(86_400);
+        let seconds_of_day = unix_seconds.rem_euclid(86_400);
+        let (year, month, day) = civil_from_days(days);
+        let hour = (seconds_of_day / 3_600) as u32;
+        let minute = ((seconds_of_day % 3_600) / 60) as u32;
+        let second = (seconds_of_day % 60) as u32;
+        DateTimeParts {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+            second,
+        }
+    }
+
+    let unix_seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let dt = utc_parts_from_unix_seconds(unix_seconds);
+    format!(
+        "{:04}{:02}{:02}-{:02}{:02}{:02}",
+        dt.year, dt.month, dt.day, dt.hour, dt.minute, dt.second
+    )
 }
 
 fn migrate_legacy_release_files(target_dir: &PathBuf) -> Result<(), String> {
@@ -929,6 +1135,17 @@ fn migrate_legacy_release_files(target_dir: &PathBuf) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be after epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("openmousegesture-{}-{}", label, unique));
+        fs::create_dir_all(&dir).expect("temp dir should be created");
+        dir
+    }
 
     #[test]
     fn legacy_mouse_triggers_migrate_to_unified_format() {
@@ -936,13 +1153,23 @@ mod tests {
         assert_eq!(normalize_trigger_binding("middle", "mouse:middle"), "mouse:middle");
         assert_eq!(normalize_trigger_binding("x1", "mouse:x1"), "mouse:x1");
         assert_eq!(normalize_trigger_binding("x2", "mouse:x2"), "mouse:x2");
-        assert_eq!(normalize_trigger_binding("left", "mouse:right"), "mouse:left");
     }
 
     #[test]
     fn unified_mouse_triggers_round_trip() {
-        for value in ["mouse:right", "mouse:middle", "mouse:x1", "mouse:x2", "mouse:left"] {
+        for value in ["mouse:right", "mouse:middle", "mouse:x1", "mouse:x2"] {
             assert_eq!(normalize_trigger_binding(value, "mouse:right"), value);
+        }
+    }
+
+    #[test]
+    fn left_click_is_never_a_valid_trigger_binding() {
+        // Left click must never be registerable: it must be cleared to the
+        // unassigned state instead of being normalized to "mouse:left", and
+        // must fail raw validation if it somehow appears on disk.
+        for input in ["left", "mouse:left", "Left", "MOUSE:LEFT", " mouse:left "] {
+            assert_eq!(normalize_trigger_binding(input, "mouse:right"), UNASSIGNED_TRIGGER);
+            assert!(!is_valid_trigger_binding(input));
         }
     }
 
@@ -995,6 +1222,142 @@ mod tests {
 
         let twice_normalized = normalized.clone().normalized();
         assert_eq!(normalized, twice_normalized);
+    }
+
+    #[test]
+    fn config_normalization_sanitizes_left_click_trigger_to_unassigned() {
+        // Mirrors the real-world lockout: a config.json (hand-edited or imported)
+        // with triggerA set to left click must never activate; normalization
+        // must clear the dangerous slot without changing the other triggers.
+        let mut config = Config::default();
+        config.triggerA = "mouse:left".to_string();
+        config.triggerB = "left".to_string();
+
+        let normalized = config.normalized();
+        assert_eq!(normalized.triggerA, UNASSIGNED_TRIGGER);
+        assert_eq!(normalized.triggerB, UNASSIGNED_TRIGGER);
+        assert!(normalized.validate().is_ok());
+    }
+
+    #[test]
+    fn unassigned_trigger_binding_is_valid_and_stable() {
+        assert_eq!(normalize_trigger_binding("", "mouse:right"), UNASSIGNED_TRIGGER);
+        assert!(is_valid_trigger_binding(""));
+        assert!(Config {
+            triggerA: UNASSIGNED_TRIGGER.to_string(),
+            ..Config::default()
+        }
+        .validate()
+        .is_ok());
+    }
+
+    #[test]
+    fn save_config_rejects_left_click_trigger_values() {
+        let temp_dir = unique_temp_dir("save-rejects-left");
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
+        let mut config = Config::default();
+        config.triggerA = "mouse:left".to_string();
+
+        let error = manager
+            .save_config(&config)
+            .expect_err("left click should be rejected before saving");
+        assert!(error.contains("Left click cannot be used as a trigger."));
+        assert!(!temp_dir.join("config.json").exists());
+    }
+
+    #[test]
+    fn load_config_sanitizes_left_click_and_creates_backup() {
+        let temp_dir = unique_temp_dir("load-sanitizes-left");
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
+        fs::write(
+            temp_dir.join("gestures.json"),
+            include_str!("../../config/default-gestures.json"),
+        )
+        .expect("gestures should be written");
+        fs::write(
+            temp_dir.join("config.json"),
+            serde_json::to_string_pretty(&Config {
+                triggerA: "mouse:left".to_string(),
+                triggerB: "mouse:middle".to_string(),
+                triggerC: "mouse:x1".to_string(),
+                ..Config::default()
+            })
+            .expect("config should serialize"),
+        )
+        .expect("config should be written");
+
+        let loaded = manager.load_config().expect("config should load");
+        assert_eq!(loaded.triggerA, UNASSIGNED_TRIGGER);
+        assert_eq!(loaded.triggerB, "mouse:middle");
+        assert_eq!(loaded.triggerC, "mouse:x1");
+
+        let persisted: Config = serde_json::from_str(
+            &fs::read_to_string(temp_dir.join("config.json")).expect("sanitized config should exist"),
+        )
+        .expect("sanitized config should parse");
+        assert_eq!(persisted.triggerA, UNASSIGNED_TRIGGER);
+
+        let backup_dir = fs::read_dir(&temp_dir)
+            .expect("backup dir listing should succeed")
+            .filter_map(Result::ok)
+            .find(|entry| entry.file_name().to_string_lossy().starts_with("backup-"))
+            .map(|entry| entry.path())
+            .expect("backup directory should exist");
+        let backup_config: Config = serde_json::from_str(
+            &fs::read_to_string(backup_dir.join("config.json")).expect("backup config should exist"),
+        )
+        .expect("backup config should parse");
+        assert_eq!(backup_config.triggerA, "mouse:left");
+    }
+
+    #[test]
+    fn raw_json_left_click_sanitization_rewrites_only_trigger_values() {
+        let raw = r#"{
+  "triggerA" : "mouse:left",
+  "triggerB":"left",
+  "triggerC": "mouse:x1",
+  "notes":"keep-left-as-text"
+}"#;
+
+        let (sanitized, slots) = sanitize_left_click_triggers_in_raw_json(raw);
+        assert_eq!(slots, vec!["A", "B"]);
+        assert!(sanitized.contains(r#""triggerA" : """#));
+        assert!(sanitized.contains(r#""triggerB":"""#));
+        assert!(sanitized.contains(r#""triggerC": "mouse:x1""#));
+        assert!(sanitized.contains(r#""notes":"keep-left-as-text""#));
+    }
+
+    #[test]
+    fn imported_settings_bundle_sanitizes_left_click_trigger() {
+        let temp_dir = unique_temp_dir("import-sanitizes-left");
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
+        let bundle = SettingsBundle {
+            formatVersion: 1,
+            appName: "GestureHotkeyApp".to_string(),
+            exportedAt: "0".to_string(),
+            config: Config {
+                triggerA: "mouse:left".to_string(),
+                triggerB: "key:Shift+F1".to_string(),
+                triggerC: "mouse:x2".to_string(),
+                ..Config::default()
+            },
+            gestures: serde_json::from_str(include_str!("../../config/default-gestures.json"))
+                .expect("default gestures should parse"),
+        };
+
+        manager
+            .import_settings_bundle(bundle)
+            .expect("import should sanitize left click");
+        let imported = manager.load_config().expect("imported config should load");
+        assert_eq!(imported.triggerA, UNASSIGNED_TRIGGER);
+        assert_eq!(imported.triggerB, "key:Shift+F1");
+        assert_eq!(imported.triggerC, "mouse:x2");
     }
 
     #[test]

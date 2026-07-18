@@ -87,9 +87,11 @@ static LAST_PREVIEW_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static LAST_PREVIEW_KEY: Mutex<Option<String>> = Mutex::new(None);
 static PRESSED_KEYS: LazyLock<Mutex<HashSet<u16>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 
+/// 設定側の検証をすり抜けて "left"/"mouse:left" が config に混入しても、
+/// フックが左クリックをトリガーとして掴まないようにする最終防衛ライン。
+/// 左クリックはここで常に None を返し、通常のクリック操作を保護する。
 fn parse_mouse_trigger(value: &str) -> Option<&'static str> {
     match value.trim().to_ascii_lowercase().as_str() {
-        "left" | "mouse:left" => Some("left"),
         "right" | "mouse:right" => Some("right"),
         "middle" | "mouse:middle" => Some("middle"),
         "x1" | "mouse:x1" => Some("x1"),
@@ -739,6 +741,34 @@ mod tests {
         assert_eq!(parse_mouse_trigger("x1"), Some("x1"));
         assert_eq!(parse_mouse_trigger("mouse:x1"), Some("x1"));
         assert_eq!(parse_mouse_trigger("not-a-button"), None);
+    }
+
+    #[test]
+    fn parse_mouse_trigger_never_accepts_left_click() {
+        // Runtime defense-in-depth: even if config validation is bypassed
+        // (hand-edited config.json, disk corruption), the hook layer itself
+        // must refuse to recognize left click as a trigger button.
+        assert_eq!(parse_mouse_trigger("left"), None);
+        assert_eq!(parse_mouse_trigger("mouse:left"), None);
+        assert_eq!(parse_mouse_trigger("MOUSE:LEFT"), None);
+        assert_eq!(parse_mouse_trigger(" left "), None);
+    }
+
+    #[test]
+    fn trigger_slot_for_mouse_down_never_matches_left_button_even_with_malformed_config() {
+        // Simulates a config.json that bypassed validation and still contains
+        // "mouse:left" for a slot. WM_LBUTTONDOWN must never resolve to a slot,
+        // so normal left-click interaction always keeps working.
+        let config = config_with_triggers("mouse:left", "mouse:middle", "mouse:x1");
+        let empty_data = mouse_data_for_xbutton(0);
+        assert_eq!(trigger_slot_for_mouse_down(&config, WM_LBUTTONDOWN, &empty_data), None);
+    }
+
+    #[test]
+    fn active_mouse_trigger_matches_up_never_matches_left_button() {
+        let config = config_with_triggers("mouse:left", "mouse:middle", "mouse:x1");
+        let empty_data = mouse_data_for_xbutton(0);
+        assert!(!active_mouse_trigger_matches_up(&config, "A", WM_LBUTTONUP, &empty_data));
     }
 
     #[test]
