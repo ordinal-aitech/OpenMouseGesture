@@ -148,10 +148,15 @@ pub fn emit_trajectory_update(points: &[(i32, i32)], is_drawing: bool) {
         return;
     }
 
-    let points = points.to_vec();
-    std::thread::spawn(move || {
-        trajectory_renderer::update_trajectory(&points, is_drawing);
-    });
+    // mouse_hook のフックスレッドから同期呼び出しする。以前はここを
+    // std::thread::spawn していたため、begin_gesture の「1点だけの状態に
+    // 置き換える」呼び出しが、その直後に届く WM_MOUSEMOVE 由来の
+    // append_trajectory_point(同期呼び出し)より後にスケジュールされることが
+    // あった。その場合、既に追記された複数点が spawn されたスレッドの
+    // clear+extend で丸ごと消え、軌跡が一瞬縮んでから再び伸びるように見える
+    // (=軌跡全体が追いかけてくるように震える)。呼び出し元の発生順どおりに
+    // 状態が更新されることを保証するため、この呼び出しは同期のまま行う。
+    trajectory_renderer::update_trajectory(points, is_drawing);
 }
 
 pub fn append_trajectory_point(x: i32, y: i32) {

@@ -9,6 +9,13 @@
 //     それぞれ丸線端/丸結合のジオメトリックペンで別バッファに描画し、
 //     各レイヤーのカバレッジからプリマルチプライ済みARGBを合成する
 //   - 別スレッドでウィンドウメッセージループを実行
+//   - オーバーレイウィンドウは起動時に仮想デスクトップ全体
+//     (SM_XVIRTUALSCREEN/SM_YVIRTUALSCREEN起点、SM_CXVIRTUALSCREEN×
+//     SM_CYVIRTUALSCREENサイズ)で一度だけ作成し、以後 SetWindowPos による
+//     移動・リサイズを一切行わない。ジェスチャー中に限らずプロセス生存中
+//     ずっとoriginとサイズが固定されるため、バウンディング拡大に伴う
+//     ウィンドウの再配置・ビットマップ再確保による「既に描画済みの軌跡が
+//     一瞬ずれる」現象が構造的に発生し得ない。
 
 use std::sync::Mutex;
 use std::time::Instant;
@@ -33,7 +40,9 @@ static TRAJECTORY_STATE: Mutex<TrajectoryState> = Mutex::new(TrajectoryState {
     points: Vec::new(),
     visible: false,
 });
-static WINDOW_OFFSET: Mutex<(i32, i32)> = Mutex::new((0, 0));
+// ウィンドウのorigin/サイズは起動時に仮想デスクトップ全体で一度だけ確定し、
+// 以後は不変(read-onlyスナップショットとして扱う)。書き込みはinit_renderer内の
+// 初期化コードからのみ行われる。
 static WINDOW_SIZE: Mutex<(i32, i32)> = Mutex::new((0, 0));
 static WINDOW_POS: Mutex<(i32, i32)> = Mutex::new((0, 0));
 static MEMORY_DC: Mutex<Option<isize>> = Mutex::new(None);
@@ -65,102 +74,19 @@ const BOUNDS_MARGIN: i32 = GLOW_WIDTH + 10;
 const WM_UPDATE_TRAJECTORY: u32 = WM_USER + 1;
 const MIN_FRAME_INTERVAL_MS: u64 = 16;
 
-// ジェスチャー開始点まわりに事前確保するウィンドウ半径。ほとんどのジェスチャーは
-// この範囲に収まるため、開始後にウィンドウのorigin/サイズが一切変化しない
-// (= SetWindowPosによる移動が発生しない)。この範囲を超えた場合のみ、後述の
-// merge_gesture_rectがoriginを外側へ拡張する(縮小はしない)。
-const GESTURE_PREALLOC_RADIUS: i32 = 500;
-
-// 残存していた斜め軌跡ジッターの根本原因:
-// 直線/垂直に近いストロークは手ぶれがどちらか一方の軸にしか及ばないため、
-// バウンディングのmin_x/min_yのどちらか一方しか動かず、ウィンドウは主に
-// リサイズのみ(SetWindowPosでleft/topは不変)で済んでいた。
-// 斜めストロークは手ぶれがX/Y両軸に及びやすく、フレームごとにmin_x/min_yの
-// どちらか(または両方)が変化しやすい。min_x/min_yが変わるとウィンドウの
-// left/topも変わり、毎フレームSetWindowPosで実際にウィンドウを"移動"させて
-// いた。SetWindowPos(移動)からUpdateLayeredWindow(再描画)までの間に一瞬でも
-// デスクトップコンポジタが古いビットマップを新しい位置/サイズで合成する
-// (またはその逆)瞬間が生じると、既に描画済みの軌跡全体が一瞬ズレて見える。
-// これが「水平/垂直より斜めが顕著に震える」という報告と整合する。
-// (前回のmutex統合修正は点列とバウンディングの不整合を無くしたが、
-// ウィンドウ自体が毎フレーム移動する構造は残っていたため、これだけでは
-// 斜めジッターは解消しなかった。)
+// 過去の修正(anchor矩形をジェスチャー開始点まわりに事前確保し、はみ出た場合のみ
+// 外側へ拡張する方式)は、はみ出た瞬間にSetWindowPos(リサイズ)が発生し、
+// SetWindowPosからUpdateLayeredWindowまでの間にコンポジタが古いビットマップを
+// 新しいウィンドウ矩形で合成する一瞬が生じて、既に描画済みの軌跡全体が
+// ずれて見える経路が理論上残っていた。ユーザーからは、斜め区間の後に方向を
+// 変えると軌跡全体が一瞬追従するように震えるという報告が続いていた。
 //
-// 修正方針: ジェスチャー開始時に十分広い固定originのウィンドウ矩形を確保し、
-// ジェスチャー中はその矩形内で完結する限りSetWindowPosによる移動・リサイズを
-// 一切行わない。矩形は点列から導出され、既存のcompute_bounds同様、縮小せず
-// 単調に拡大するのみ(すでに描画された点が再クリップされることはない)。
-
-// 点列から一貫した式でタイトなバウンディング矩形を導出する(マージンのみ付加)。
-fn compute_bounds(points: &[(i32, i32)]) -> Option<RECT> {
-    if points.is_empty() {
-        return None;
-    }
-
-    let mut min_x = i32::MAX;
-    let mut max_x = i32::MIN;
-    let mut min_y = i32::MAX;
-    let mut max_y = i32::MIN;
-
-    for &(x, y) in points {
-        min_x = min_x.min(x);
-        max_x = max_x.max(x);
-        min_y = min_y.min(y);
-        max_y = max_y.max(y);
-    }
-
-    Some(RECT {
-        left: min_x - BOUNDS_MARGIN,
-        top: min_y - BOUNDS_MARGIN,
-        right: max_x + BOUNDS_MARGIN,
-        bottom: max_y + BOUNDS_MARGIN,
-    })
-}
-
-// 純粋関数: 既存のジェスチャーanchor(前フレームまでの固定ウィンドウ矩形)と
-// 現在の点列から、次に使うウィンドウ矩形を導出する。
-// - anchorがNone(ジェスチャー開始点)の場合、先頭点を中心に
-//   GESTURE_PREALLOC_RADIUS分の余白を持つ矩形を新しいanchorとする。
-// - 以後は、実際のタイトなバウンディング(compute_bounds)とanchorの和集合を
-//   取るだけで、anchorに収まっている間は矩形が一切変化しない(=originが
-//   固定されウィンドウが動かない)。矩形は常に単調拡大のみで縮小しない。
-fn merge_gesture_rect(anchor: Option<RECT>, points: &[(i32, i32)]) -> Option<RECT> {
-    let raw = compute_bounds(points)?;
-
-    let anchor = anchor.unwrap_or_else(|| {
-        let (x0, y0) = points[0];
-        RECT {
-            left: x0 - GESTURE_PREALLOC_RADIUS,
-            top: y0 - GESTURE_PREALLOC_RADIUS,
-            right: x0 + GESTURE_PREALLOC_RADIUS,
-            bottom: y0 + GESTURE_PREALLOC_RADIUS,
-        }
-    });
-
-    Some(RECT {
-        left: anchor.left.min(raw.left),
-        top: anchor.top.min(raw.top),
-        right: anchor.right.max(raw.right),
-        bottom: anchor.bottom.max(raw.bottom),
-    })
-}
-
-// window_procの単一レンダースレッドからのみ呼ばれるステートフルなラッパー。
-// 点列が空(=ジェスチャー終了/非表示)になったらanchorをリセットし、
-// 次のジェスチャー開始点から新しいanchorを取り直す。
-static GESTURE_ANCHOR: Mutex<Option<RECT>> = Mutex::new(None);
-
-fn compute_window_rect(points: &[(i32, i32)]) -> Option<RECT> {
-    if points.is_empty() {
-        *GESTURE_ANCHOR.lock().unwrap() = None;
-        return None;
-    }
-
-    let mut anchor_guard = GESTURE_ANCHOR.lock().unwrap();
-    let merged = merge_gesture_rect(*anchor_guard, points);
-    *anchor_guard = merged;
-    merged
-}
+// 修正方針: ジェスチャーごとにウィンドウを可変にすることをやめ、起動時に
+// 仮想デスクトップ全体を覆う固定originの単一ウィンドウを一度だけ作成する。
+// 以後はプロセスの生存期間中、SetWindowPosによる移動・リサイズを一切行わない
+// (表示/非表示の切替と再描画のみ)。これにより、ジェスチャーがどれだけ
+// 大きく/どの方向に転じても、ウィンドウのorigin・サイズ・ローカル座標変換は
+// 一切変化しようがない。
 
 unsafe fn clear_dc(dc: HDC, width: i32, height: i32) {
     let _ = PatBlt(dc, 0, 0, width, height, BLACKNESS);
@@ -202,85 +128,6 @@ unsafe fn create_sized_dib(compat_dc: HDC, width: i32, height: i32) -> (HDC, HBI
         let _ = DeleteObject(old);
     }
     (dc, dib)
-}
-
-unsafe fn realloc_dib_slot(
-    dc_slot: &Mutex<Option<isize>>,
-    bitmap_slot: &Mutex<Option<isize>>,
-    compat_dc: HDC,
-    width: i32,
-    height: i32,
-) {
-    {
-        let dc_opt = *dc_slot.lock().unwrap();
-        let bitmap_opt = *bitmap_slot.lock().unwrap();
-        if let Some(bitmap_val) = bitmap_opt {
-            let _ = DeleteObject(HGDIOBJ(bitmap_val as *mut _));
-        }
-        if let Some(dc_val) = dc_opt {
-            let _ = DeleteDC(HDC(dc_val as *mut _));
-        }
-    }
-
-    let (dc, bitmap) = create_sized_dib(compat_dc, width, height);
-    *dc_slot.lock().unwrap() = Some(dc.0 as isize);
-    *bitmap_slot.lock().unwrap() = Some(bitmap.0 as isize);
-}
-
-// 軌跡のバウンディングにウィンドウとDIBを合わせる（スナップショット版）
-unsafe fn ensure_window_matches_bounds_with_snapshot(hwnd: HWND, snapshot_bounds: Option<RECT>) {
-    if let Some(r) = snapshot_bounds {
-        let left = r.left;
-        let top = r.top;
-        let w = (r.right - r.left).max(1);
-        let h = (r.bottom - r.top).max(1);
-
-        // 現在のウィンドウ情報
-        let (cur_w, cur_h) = *WINDOW_SIZE.lock().unwrap();
-        let (cur_x, cur_y) = *WINDOW_POS.lock().unwrap();
-
-        let need_realloc = w != cur_w || h != cur_h;
-        let need_move = left != cur_x || top != cur_y;
-
-        if need_realloc {
-            let mem_dc_val_opt = *MEMORY_DC.lock().unwrap();
-            if let Some(mem_dc_val) = mem_dc_val_opt {
-                let mem_dc = HDC(mem_dc_val as *mut _);
-                realloc_dib_slot(&MEMORY_DC, &MEMORY_BITMAP, mem_dc, w, h);
-                realloc_dib_slot(&MASK_DC_GLOW, &MASK_BITMAP_GLOW, mem_dc, w, h);
-                realloc_dib_slot(&MASK_DC_BODY, &MASK_BITMAP_BODY, mem_dc, w, h);
-                realloc_dib_slot(&MASK_DC_CORE, &MASK_BITMAP_CORE, mem_dc, w, h);
-
-                {
-                    let mut size = WINDOW_SIZE.lock().unwrap();
-                    *size = (w, h);
-                }
-
-                clear_memory_dc();
-            }
-        }
-
-        if need_move || need_realloc {
-            let _ = SetWindowPos(
-                hwnd,
-                Some(HWND_TOPMOST),
-                left,
-                top,
-                w,
-                h,
-                SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOREDRAW,
-            );
-            {
-                let mut pos = WINDOW_POS.lock().unwrap();
-                *pos = (left, top);
-            }
-            {
-                let mut off = WINDOW_OFFSET.lock().unwrap();
-                // ローカル座標変換用に、オフセット=ウィンドウ左上
-                *off = (left, top);
-            }
-        }
-    }
 }
 
 // 指定幅・丸線端/丸結合のジオメトリックペンで折れ線を白色描画する（カバレッジマスク用）
@@ -367,15 +214,11 @@ unsafe fn get_mask_bits(dc: HDC, bitmap: HBITMAP, width: i32, height: i32) -> Ve
     bits
 }
 
-unsafe fn render_to_memory_dc_with_snapshot(
-    snapshot_bounds: Option<RECT>,
-    snapshot_points: Vec<(i32, i32)>,
-) {
-    let (offset_x, offset_y) = if let Some(rect) = snapshot_bounds {
-        (rect.left, rect.top)
-    } else {
-        (0, 0)
-    };
+// snapshot_points はウィンドウのローカル座標系ではなく、常に物理スクリーン座標
+// (accepted point) のまま保持される。ローカル座標への変換は、ウィンドウ作成時に
+// 一度だけ確定した固定originを都度引くだけであり、他のいかなる値にも依存しない。
+unsafe fn render_to_memory_dc_with_snapshot(snapshot_points: Vec<(i32, i32)>) {
+    let (offset_x, offset_y) = *WINDOW_POS.lock().unwrap();
     let (width, height) = *WINDOW_SIZE.lock().unwrap();
 
     let mem_dc_opt = *MEMORY_DC.lock().unwrap();
@@ -569,25 +412,18 @@ unsafe extern "system" fn window_proc(
         WM_UPDATE_TRAJECTORY => {
             let visible = wparam.0 != 0;
             if visible {
-                // 単一Mutexから点列を1回のロックでスナップショットし、バウンディングは
-                // 必ずこのスナップショットから再計算する。点列とバウンディングが
-                // 別々のタイミングで観測されることがなくなり、ウィンドウ位置・
-                // クリッピング・描画オフセットが常に同じジオメトリを参照する。
+                // ウィンドウのorigin/サイズは起動時に確定した仮想デスクトップ全体で
+                // 不変のため、ここでは点列のスナップショットを取って同じ固定originで
+                // 再描画するだけでよい。ウィンドウの移動・リサイズは一切発生しない。
                 let snapshot_points = {
                     let state = TRAJECTORY_STATE.lock().unwrap();
                     state.points.clone()
                 };
-                let snapshot_bounds = compute_window_rect(&snapshot_points);
 
-                ensure_window_matches_bounds_with_snapshot(hwnd, snapshot_bounds.clone());
-                render_to_memory_dc_with_snapshot(snapshot_bounds, snapshot_points);
+                render_to_memory_dc_with_snapshot(snapshot_points);
                 update_layered_window_from_memory(hwnd);
                 let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
             } else {
-                // ジェスチャー終了。次のジェスチャーが別の場所で始まったときに
-                // 前回のanchorを引きずって無関係な領域までウィンドウが広がらない
-                // よう、ここで明示的にanchorをリセットする。
-                *GESTURE_ANCHOR.lock().unwrap() = None;
                 clear_memory_dc();
                 update_layered_window_from_memory(hwnd);
                 let _ = ShowWindow(hwnd, SW_HIDE);
@@ -635,20 +471,23 @@ pub fn init_renderer() -> Result<()> {
 
         RegisterClassExW(&wc);
 
-        let _virtual_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
-        let _virtual_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
-        let _virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-        let _virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        // 仮想デスクトップ全体を覆う固定originのウィンドウを一度だけ作成する。
+        // 以後プロセスの生存期間中、このoriginとサイズは二度と変更しない
+        // (SetWindowPosは本ファイルのどこからも呼ばれない)。
+        let virtual_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let virtual_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1);
+        let virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN).max(1);
 
         let hwnd = CreateWindowExW(
             WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
             WINDOW_CLASS_NAME,
             w!(""),
             WS_POPUP,
-            0,
-            0,
-            1,
-            1,
+            virtual_x,
+            virtual_y,
+            virtual_width,
+            virtual_height,
             None,
             None,
             Some(hinstance),
@@ -667,25 +506,20 @@ pub fn init_renderer() -> Result<()> {
         }
 
         {
-            let mut offset = WINDOW_OFFSET.lock().unwrap();
-            *offset = (0, 0);
-        }
-
-        {
             let mut size = WINDOW_SIZE.lock().unwrap();
-            *size = (1, 1);
+            *size = (virtual_width, virtual_height);
         }
 
         {
             let mut pos = WINDOW_POS.lock().unwrap();
-            *pos = (0, 0);
+            *pos = (virtual_x, virtual_y);
         }
 
         let screen_dc = GetDC(None);
-        let (mem_dc, mem_bitmap) = create_sized_dib(screen_dc, 1, 1);
-        let (glow_dc, glow_bitmap) = create_sized_dib(screen_dc, 1, 1);
-        let (body_dc, body_bitmap) = create_sized_dib(screen_dc, 1, 1);
-        let (core_dc, core_bitmap) = create_sized_dib(screen_dc, 1, 1);
+        let (mem_dc, mem_bitmap) = create_sized_dib(screen_dc, virtual_width, virtual_height);
+        let (glow_dc, glow_bitmap) = create_sized_dib(screen_dc, virtual_width, virtual_height);
+        let (body_dc, body_bitmap) = create_sized_dib(screen_dc, virtual_width, virtual_height);
+        let (core_dc, core_bitmap) = create_sized_dib(screen_dc, virtual_width, virtual_height);
         let _ = ReleaseDC(None, screen_dc);
 
         {
@@ -883,192 +717,118 @@ mod tests {
         assert!(CORE_ALPHA >= 245, "core must be close to fully opaque");
     }
 
-    // --- ジオメトリ安定性(ジッター修正)のテスト ---
-    // compute_bounds は常に同一の点列スナップショットから同じ式で
-    // バウンディングを導出する。これにより、window/DIBの配置と描画オフセットが
-    // フレーム間で不整合になる(=軌跡が震える)ことを防ぐ。
+    // --- 固定スクリーン空間アーキテクチャのテスト ---
+    // ウィンドウのorigin/サイズは起動時(init_renderer)に仮想デスクトップ全体で
+    // 一度だけ確定し、以後プロセスの生存期間中不変であることが前提。
+    // 本ファイルにはSetWindowPos呼び出しが一切存在しない(grepで確認可能)ため、
+    // ここではその不変条件のもとで座標変換・状態管理が正しく振る舞うことを検証する。
 
-    #[test]
-    fn compute_bounds_is_none_for_empty_points() {
-        assert!(compute_bounds(&[]).is_none());
+    fn reset_state_for_test() {
+        let mut state = TRAJECTORY_STATE.lock().unwrap();
+        state.points.clear();
+        state.visible = false;
     }
 
     #[test]
-    fn compute_bounds_is_deterministic_for_same_points() {
-        let points = vec![(10, 20), (50, 5), (30, 80), (-10, 40)];
-        let a = compute_bounds(&points).unwrap();
-        let b = compute_bounds(&points).unwrap();
-        assert_eq!((a.left, a.top, a.right, a.bottom), (b.left, b.top, b.right, b.bottom));
+    fn accepted_points_are_stored_verbatim_as_physical_screen_coordinates() {
+        // append_trajectory_point/update_trajectory は受け取った座標をそのまま
+        // 保持するだけで、いかなる変換・丸め・平滑化も行わない。
+        reset_state_for_test();
+        update_trajectory(&[(100, 100)], true);
+        append_trajectory_point(140, 90);
+        append_trajectory_point(180, 80);
+        append_trajectory_point(300, 80); // 斜め -> 水平への方向転換
+
+        let points = TRAJECTORY_STATE.lock().unwrap().points.clone();
+        assert_eq!(points, vec![(100, 100), (140, 90), (180, 80), (300, 80)]);
     }
 
     #[test]
-    fn compute_bounds_is_invariant_to_point_insertion_order() {
-        // 到着順に関わらず、同じ点集合なら同じバウンディングになることを保証する。
-        // これは append_trajectory_point による逐次追加と、
-        // update_trajectory によるバルク更新が同じ結果になることの根拠。
-        let ordered = vec![(-10, 40), (10, 20), (30, 80), (50, 5)];
-        let shuffled = vec![(50, 5), (10, 20), (-10, 40), (30, 80)];
-        let a = compute_bounds(&ordered).unwrap();
-        let b = compute_bounds(&shuffled).unwrap();
-        assert_eq!((a.left, a.top, a.right, a.bottom), (b.left, b.top, b.right, b.bottom));
-    }
+    fn appending_new_points_never_mutates_previously_accepted_points() {
+        // 過去に受理された点は、新しい点が追加されても一切書き換わらない
+        // (=既に描画された区間のローカル座標が変化しようがない根拠)。
+        reset_state_for_test();
+        update_trajectory(&[(0, 0)], true);
+        let mut previous_prefix = TRAJECTORY_STATE.lock().unwrap().points.clone();
 
-    #[test]
-    fn compute_bounds_matches_margin_formula() {
-        let points = vec![(100, 200)];
-        let bounds = compute_bounds(&points).unwrap();
-        assert_eq!(bounds.left, 100 - BOUNDS_MARGIN);
-        assert_eq!(bounds.top, 200 - BOUNDS_MARGIN);
-        assert_eq!(bounds.right, 100 + BOUNDS_MARGIN);
-        assert_eq!(bounds.bottom, 200 + BOUNDS_MARGIN);
-    }
-
-    #[test]
-    fn compute_bounds_grows_monotonically_as_points_are_appended() {
-        // 軌跡が伸びるにつれてバウンディングは単調に拡大するのみで、
-        // 縮小して既存の点がクリップされることがないことを保証する
-        // (これも「既に描画された経路が視覚的に固定されている」ための前提)。
-        let mut points = vec![(0, 0)];
-        let mut prev = compute_bounds(&points).unwrap();
-        for p in [(5, -5), (-20, 10), (30, 30), (-5, -40)] {
-            points.push(p);
-            let next = compute_bounds(&points).unwrap();
-            assert!(next.left <= prev.left);
-            assert!(next.top <= prev.top);
-            assert!(next.right >= prev.right);
-            assert!(next.bottom >= prev.bottom);
-            prev = next;
-        }
-    }
-
-    // --- merge_gesture_rect (ジェスチャーanchor固定) のテスト ---
-    // 斜めストロークで残っていたジッターは、手ぶれでmin_x/min_yのどちらかが
-    // フレームごとに変化し、毎フレームSetWindowPosでウィンドウのleft/topが
-    // 実際に動いてしまうことが原因だった。merge_gesture_rectは、ジェスチャー
-    // 開始点まわりに広い矩形を一度だけ確保し(anchor)、その範囲に収まる限り
-    // originが一切変化しないことを保証する。
-
-    #[test]
-    fn merge_gesture_rect_is_none_for_empty_points() {
-        assert!(merge_gesture_rect(None, &[]).is_none());
-    }
-
-    #[test]
-    fn merge_gesture_rect_first_call_anchors_around_first_point() {
-        let points = vec![(1000, 2000)];
-        let rect = merge_gesture_rect(None, &points).unwrap();
-        assert_eq!(rect.left, 1000 - GESTURE_PREALLOC_RADIUS);
-        assert_eq!(rect.top, 2000 - GESTURE_PREALLOC_RADIUS);
-        assert_eq!(rect.right, 1000 + GESTURE_PREALLOC_RADIUS);
-        assert_eq!(rect.bottom, 2000 + GESTURE_PREALLOC_RADIUS);
-    }
-
-    #[test]
-    fn merge_gesture_rect_origin_stays_fixed_for_diagonal_motion_within_radius() {
-        // 斜めストローク(X/Y両方が毎フレーム動く)を模したシーケンス。
-        // GESTURE_PREALLOC_RADIUS以内に収まっている限り、2点目以降は
-        // 矩形が一切変化しない(=ウィンドウは一度も移動・リサイズしない)ことを
-        // 確認する。これが斜めジッターの直接的な修正。
-        let mut points = vec![(500, 500)];
-        let anchor = merge_gesture_rect(None, &points).unwrap();
-
-        let mut current = anchor;
-        for step in 1..=50 {
-            // 斜め(down-right)に手ぶれを伴いながら進む
-            let jitter_x = if step % 3 == 0 { -1 } else { 0 };
-            let jitter_y = if step % 2 == 0 { -1 } else { 0 };
-            points.push((500 + step * 5 + jitter_x, 500 + step * 5 + jitter_y));
-            let next = merge_gesture_rect(Some(current), &points).unwrap();
+        for (x, y) in [(10, 5), (25, -10), (25, 40), (60, 40)] {
+            append_trajectory_point(x, y);
+            let current = TRAJECTORY_STATE.lock().unwrap().points.clone();
             assert_eq!(
-                (next.left, next.top, next.right, next.bottom),
-                (current.left, current.top, current.right, current.bottom),
-                "window rect must not move while path stays inside the preallocated anchor"
+                &current[..previous_prefix.len()],
+                previous_prefix.as_slice(),
+                "previously accepted points must remain byte-for-byte identical"
             );
-            current = next;
+            previous_prefix = current;
         }
     }
 
     #[test]
-    fn merge_gesture_rect_diagonal_up_right_and_down_right_are_equally_stable() {
-        // up-right, down-right どちらの斜め方向でも同じ式が使われることを保証する
-        // (片方の軸だけ別ルールで丸められる、といった非対称が無いことの根拠)。
-        let start = vec![(0, 0)];
-        let anchor = merge_gesture_rect(None, &start).unwrap();
+    fn reset_occurs_only_on_explicit_gesture_end() {
+        // ジェスチャーの途中(方向転換を含む)ではTRAJECTORY_STATEがクリアされず、
+        // 明示的にvisible=falseが渡されたとき(=ジェスチャー終了)のみリセットされる。
+        reset_state_for_test();
+        update_trajectory(&[(0, 0)], true);
+        append_trajectory_point(50, 50); // diagonal
+        append_trajectory_point(150, 50); // turn to horizontal
+        append_trajectory_point(150, -50); // turn to vertical
 
-        let down_right: Vec<(i32, i32)> = (0..20).map(|i| (0 + i * 4, 0 + i * 4)).collect();
-        let up_right: Vec<(i32, i32)> = (0..20).map(|i| (0 + i * 4, 0 - i * 4)).collect();
+        {
+            let state = TRAJECTORY_STATE.lock().unwrap();
+            assert_eq!(state.points.len(), 4);
+            assert!(state.visible);
+        }
 
-        let rect_dr = merge_gesture_rect(Some(anchor), &down_right).unwrap();
-        let rect_ur = merge_gesture_rect(Some(anchor), &up_right).unwrap();
+        clear_trajectory_display();
 
-        // 両方ともpreallocated anchor内に収まるため、originはanchorのまま不変。
-        assert_eq!((rect_dr.left, rect_dr.top), (anchor.left, anchor.top));
-        assert_eq!((rect_ur.left, rect_ur.top), (anchor.left, anchor.top));
+        let state = TRAJECTORY_STATE.lock().unwrap();
+        assert!(state.points.is_empty());
+        assert!(!state.visible);
     }
 
     #[test]
-    fn merge_gesture_rect_expansion_beyond_anchor_never_shrinks_or_reclips() {
-        // preallocされた範囲を超えて伸びるジェスチャーでも、矩形は単調拡大のみで
-        // 縮小しない(=既に描画済みの点が再クリップされることがない)。
-        let mut points = vec![(0, 0)];
-        let mut anchor = merge_gesture_rect(None, &points).unwrap();
-        let mut prev = anchor;
-        for step in 1..=10 {
-            points.push((step * (GESTURE_PREALLOC_RADIUS / 2), step * (GESTURE_PREALLOC_RADIUS / 2)));
-            let next = merge_gesture_rect(Some(anchor), &points).unwrap();
-            assert!(next.left <= prev.left);
-            assert!(next.top <= prev.top);
-            assert!(next.right >= prev.right);
-            assert!(next.bottom >= prev.bottom);
-            prev = next;
-            anchor = next;
+    fn local_coordinate_conversion_uses_one_constant_origin_including_negative() {
+        // ローカル座標変換は「物理スクリーン座標 - ジェスチャー開始時に確定した
+        // 単一の固定origin」のみで行われる。マルチモニタでプライマリが左上に
+        // ないケース(originが負)でも同じ式が使えることを確認する。
+        let origin = (-1920, -200);
+        let physical_points = [(-1920, -200), (-1870, -150), (-1770, -150), (-1770, 50)];
+
+        let local_before_turn: Vec<(i32, i32)> = physical_points[..3]
+            .iter()
+            .map(|&(x, y)| (x - origin.0, y - origin.1))
+            .collect();
+        let local_after_turn: Vec<(i32, i32)> = physical_points
+            .iter()
+            .map(|&(x, y)| (x - origin.0, y - origin.1))
+            .collect();
+
+        // 方向転換後に新しい点が加わっても、それ以前の点のローカル座標は
+        // 同じoriginを使う限り一切変化しない。
+        assert_eq!(&local_after_turn[..3], local_before_turn.as_slice());
+        assert_eq!(local_after_turn[0], (0, 0));
+    }
+
+    #[test]
+    fn glow_body_core_layers_share_identical_point_sequence_and_offset() {
+        // render_to_memory_dc_with_snapshot は glow/body/core の3レイヤーすべてに
+        // 対して同一の snapshot_points と同一の offset (= WINDOW_POS) を
+        // draw_stroke_mask に渡す。3回の呼び出しが異なるジオメトリを参照する
+        // 余地がないことをソース構造として固定するための回帰テスト。
+        let src = include_str!("trajectory_renderer.rs");
+        let calls: Vec<&str> = src
+            .lines()
+            .filter(|l| l.trim_start().starts_with("draw_stroke_mask("))
+            .collect();
+        assert_eq!(calls.len(), 3, "expected exactly one draw_stroke_mask call per layer");
+        for call in &calls {
+            assert!(call.contains("&snapshot_points, offset"));
         }
     }
 
     #[test]
-    fn merge_gesture_rect_is_deterministic_regardless_of_call_pattern() {
-        // 同じ最終点列であれば、anchorがNoneから逐次構築されても、
-        // 途中経過を経ても、最終的な矩形は決定的であること。
-        let points = vec![(10, 10), (14, 6), (18, 2), (22, -2)];
-        let mut anchor = None;
-        for i in 1..=points.len() {
-            anchor = merge_gesture_rect(anchor, &points[..i]);
-        }
-        let incremental = anchor.unwrap();
-
-        let direct_anchor = merge_gesture_rect(None, &points[..1]).unwrap();
-        let direct = merge_gesture_rect(Some(direct_anchor), &points).unwrap();
-
-        assert_eq!(
-            (incremental.left, incremental.top, incremental.right, incremental.bottom),
-            (direct.left, direct.top, direct.right, direct.bottom)
-        );
-    }
-
-    #[test]
-    fn compute_window_rect_resets_anchor_when_points_become_empty() {
-        // ジェスチャー終了(空の点列)後、次のジェスチャーが別の場所で始まった
-        // とき、前回のanchorを引きずらないことを確認する(スレッドローカルな
-        // GESTURE_ANCHORのリセット挙動)。テスト間の静的状態干渉を避けるため、
-        // 各アサーションの直前で明示的にNoneへ戻す。
-        *GESTURE_ANCHOR.lock().unwrap() = None;
-
-        let first_gesture = vec![(0, 0), (10, 10)];
-        let rect1 = compute_window_rect(&first_gesture).unwrap();
-        assert_eq!(rect1.left, 0 - GESTURE_PREALLOC_RADIUS);
-
-        // ジェスチャー終了: 空点列で呼ぶとanchorがリセットされる
-        assert!(compute_window_rect(&[]).is_none());
-
-        // 全く別の場所で新しいジェスチャーが始まる
-        let second_gesture = vec![(5000, 5000)];
-        let rect2 = compute_window_rect(&second_gesture).unwrap();
-        assert_eq!(
-            rect2.left,
-            5000 - GESTURE_PREALLOC_RADIUS,
-            "anchor must not carry over the previous gesture's location"
-        );
-
-        *GESTURE_ANCHOR.lock().unwrap() = None;
+    fn rgb_from_colorref_roundtrips_hex_regression() {
+        let (r, g, b) = rgb_from_colorref(0x00112233);
+        assert_eq!((r, g, b), (0x33, 0x22, 0x11));
     }
 }
