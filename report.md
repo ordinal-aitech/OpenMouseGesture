@@ -1,4 +1,4 @@
-# report.md — Open Mouse Gesture: Trajectory Design B / Jitter Fix / Legacy Settings Import
+# report.md — Open Mouse Gesture: 残存する斜め軌跡ジッターの根本修正
 
 ## 対象
 
@@ -6,213 +6,233 @@ Working directory: `C:\GitHub\open-mouse-gesture`
 Primary source: `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/`
 実行: Claude Code CLI, Sonnet, medium effort。
 
-## A. トラジェクトリ デザインB（濃い赤コア + 柔らかい外側グロー）
+前タスク（コミット `8b47b41`, デザインB + mutex統合修正）に続くタスク。
+ユーザーの実機確認により、色/太さ/水平・垂直ストロークは改善したが、
+**斜めストロークのみ依然として明確に震える**ことが報告された。本タスクはこの
+残存ジッターの根本原因特定と修正のみを対象とする。レガシー設定インポートの
+意味的な再構築はスコープ外（ユーザーが手動再設定を受け入れ済み）。
+
+## 参照した正本
+
+- `C:\GitHub\ai-executor\AGENTS.md`
+- `C:\GitHub\ai-executor\00_ROUTING.md`
+- `C:\GitHub\ai-executor\01_AI_ORCHESTRATOR_RUNTIME.md`
+- `C:\GitHub\ai-executor\02_SOFTWARE_IMPLEMENTATION_EXECUTION.md`
+- `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/README.md`
+- `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/CLAUDE.md`
+- `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/docs/*.yaml`
+- `git log` 直近コミット `8b47b41`, `40caac7`
+- `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/src/trajectory_renderer.rs`（全文読了）
+- `.../src-tauri/src/mouse_hook.rs`（座標の発生源: `mouse_data.pt.x/y`）
+- `.../src-tauri/src/lib.rs`（`append_trajectory_point`/`update_trajectory`/`clear_trajectory_display` の呼び出し経路）
+
+参照できなかった正本はなし。
+
+## 斜めジッターの正確な根本原因
+
+**座標そのものは常に正しく、不変（immutable）だった。** マウスフックから来る
+`mouse_data.pt.x/y`（スクリーン絶対座標の整数）がそのまま `append_trajectory_point`
+経由で `TRAJECTORY_STATE.points` に追記されるだけで、DPIスケーリングや別々の丸め、
+リトロアクティブな平滑化は一切存在しない。X/Y間の丸めルール差も無かった。
+つまり「点そのものが動く」問題ではなかった。
+
+問題は **レイヤードウィンドウ自体が毎フレーム動いていたこと** にあった。
+
+- 旧 `compute_bounds()` は、その時点の全点列の `min_x/min_y/max_x/max_y` を
+  そのままウィンドウの `left/top/right/bottom` として使っていた。
+- `ensure_window_matches_bounds_with_snapshot()` は `left/top` が前回と異なれば
+  `SetWindowPos` で **実際にウィンドウを移動**させ、その後 `render_to_memory_dc_with_snapshot`
+  → `UpdateLayeredWindow` で再描画していた。
+- 水平・垂直に近いストロークは手ぶれが片方の軸にしか及ばないことが多く、
+  `min_x`（またはmin_y）のどちらか一方だけが安定するため、ウィンドウは
+  「リサイズのみ」で済むフレームが多かった（=移動しない=震えにくい）。
+- **斜めストロークは手ぶれがX/Y両軸に同時に及びやすく**、`min_x`・`min_y`の
+  どちらか（または両方）がフレームごとに変化しやすい。これが起きるたびに
+  `SetWindowPos` でウィンドウの `left/top` が実際に動いていた。
+  `SetWindowPos`（移動）→`UpdateLayeredWindow`（再描画）の間に一瞬でも
+  デスクトップコンポジタが古いビットマップを新しい位置で（またはその逆で）
+  合成する瞬間が生じると、**既に描画済みの軌跡全体が画面上で一瞬ズレて見える**。
+  これが「水平/垂直は改善したが斜めだけ明確に震える」という報告と正確に整合する。
+
+### 前回のmutex統合修正がなぜ不十分だったか
+
+前回の修正（`8b47b41`）は「点列スナップショットとバウンディングが別々のロックで
+不整合になる」という問題（*同一フレーム内でのデータ不整合*）を解消した。これは
+正しく必要な修正だったが、**バウンディングが確定した後の「ウィンドウが毎フレーム
+移動する」という構造自体は変えていなかった**。つまり「不整合なジオメトリを
+描画する」バグは直したが、「整合したジオメトリであっても、ウィンドウの
+物理的な移動自体が視覚的な段差を生む」という別の原因は未修正のまま残っていた。
+これが斜めストロークでのみ顕著に残存した理由である。
+
+## 座標空間と丸めルール（変更前/変更後で不変）
+
+- 記録座標空間: スクリーン絶対座標（`i32`、マウスフックの生値）。**変更なし**。
+  一度 `TRAJECTORY_STATE.points` に追記された点は書き換えられない（不変）。
+- ローカル描画座標: `local = point - window_origin`。`window_origin` は常に整数。
+- X/Y は常に同じ式・同じ丸め規則（`i32`の単純な減算、四捨五入なし）で扱われ、
+  軸ごとの非対称な丸めは存在しない（変更前後とも）。
+- DPI変換: マウスフックは物理ピクセル座標を返すため、フレームごとに変動する
+  DPIスケール変換は元々存在しない（確認済み、変更なし）。
+
+## ウィンドウorigin/挙動: 変更前 → 変更後
+
+- **変更前**: `compute_bounds(points)` = 現在の全点列から都度計算した
+  タイトな矩形（+マージン）。ジェスチャーの手ぶれで `min_x`/`min_y` が
+  変化するたびに、ウィンドウの `left/top` が実際に動く。
+- **変更後**: ジェスチャー開始点まわりに `GESTURE_PREALLOC_RADIUS = 500px` の
+  余白を持つ矩形を一度だけ確保（**anchor**）。以後は「タイトな実バウンディング
+  ∪ anchor」を取るだけなので、実際の軌跡が事前確保領域に収まっている間は
+  **矩形が一切変化しない**（=`SetWindowPos`による移動が一度も起きない）。
+  事前確保領域を超えて伸びた場合のみ、矩形は外側へ単調拡大する（縮小はしない
+  = 既に描画済みの点が再クリップされることはない、という既存の保証を維持）。
+  ジェスチャー終了（`clear_trajectory_display`／非表示化）時に anchor を
+  明示的にリセットし、次のジェスチャーが別の場所で始まっても前回の位置を
+  引きずらないようにした。
+
+## 実装した修正
 
 対象ファイル: `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/src/trajectory_renderer.rs`
 
-### 変更前
+1. `GESTURE_PREALLOC_RADIUS: i32 = 500` を追加。典型的なジェスチャーの
+   移動範囲を十分に覆う値として選定（ジェスチャー中にウィンドウが
+   一切動かないことを狙う）。
+2. 既存の `compute_bounds()`（タイトなバウンディング計算、既存テストごと維持）は
+   そのまま残し、新たに純粋関数 `merge_gesture_rect(anchor: Option<RECT>, points) -> Option<RECT>`
+   を追加。anchorが無い場合は先頭点まわりに事前確保矩形を新規作成、ある場合は
+   タイトな実バウンディングとの和集合を返すのみ（副作用なし、決定的、
+   単体テストで直接検証可能）。
+3. レンダースレッド専用の状態付きラッパー `compute_window_rect(points)` を追加し、
+   `static GESTURE_ANCHOR: Mutex<Option<RECT>>` を介して `merge_gesture_rect` を
+   呼び出す。点列が空になった時点で anchor を `None` にリセットする。
+4. `window_proc` の `WM_UPDATE_TRAJECTORY`（`visible=true`）ハンドラで、
+   バウンディング取得を `compute_bounds(&snapshot_points)` から
+   `compute_window_rect(&snapshot_points)` に置き換え。
+5. `visible=false`（非表示化）分岐でも `GESTURE_ANCHOR` を明示的にリセットし、
+   次回ジェスチャーが前回位置の矩形を引きずらないようにした。
+6. 3レイヤー（glow/body/core）は従来どおり `render_to_memory_dc_with_snapshot` 内で
+   同一の `offset`・同一の `snapshot_points` を使って `draw_stroke_mask` を
+   3回呼ぶ構造を維持（変更なし）。これにより新しい `compute_window_rect` の
+   出力を使っても3層のジオメトリが完全に一致することは構造的に保証される。
 
-`derive_shades()` はコアをベース色から**白へ45%寄せて**明るくしていた
-(`lerp_u8(base, 255, 0.45)`)。結果としてコアが白っぽく薄く見え、
-「too pale」というユーザー指摘の直接原因になっていた。
+デザインB（コア/ボディ/グローの色・太さ・アルファ）は一切変更していない。
+`ACTION_LABEL_OVERLAY_ENABLED` は本タスクで触れていない。
 
-- `CORE_ALPHA = 235`, `BODY_ALPHA = 175`, `GLOW_ALPHA = 60`
-- core = ベース色を白へ45%寄せた色（薄い）
-- body = ベース色そのまま
-- glow = ベース色を黒へ10%寄せた色
+## 追加テスト
 
-### 変更後（デザインB）
+すべて `trajectory_renderer.rs` 内の `#[cfg(test)] mod tests` に追加（既存25テストは無変更で維持）。
 
-- **コア**: ベース色を**黒へ12%だけ寄せる**（白へ寄せない）。彩度・強さを保ち、
-  むしろ密度感を出す。`CORE_ALPHA = 255`（ほぼ完全不透明）。
-- **ボディ**: ベース色そのまま、`BODY_ALPHA = 150`（半透明で太さを支える）。
-- **グロー**: ベース色を白へ20%寄せた柔らかい色、`GLOW_ALPHA = 55`（低不透明度で外側へ自然にフェード）。
-- 太さ（`CORE_WIDTH=4`, `BODY_WIDTH=9`, `GLOW_WIDTH=16`）はユーザー確認済みの現状を維持し、変更していない。
-- 丸線端/丸結合ペン(`PS_ENDCAP_ROUND | PS_JOIN_ROUND`)、プリマルチプライ済みARGB合成のロジックはそのまま維持。
-- トリガー色は `set_active_color()` 経由で `ACTIVE_LINE_COLOR` に反映され、`derive_shades()` が都度そこから3色を導出する仕組みは変更していない（トリガーごとの色設定を維持）。
+1. `merge_gesture_rect_is_none_for_empty_points` — 空点列は常に `None`。
+2. `merge_gesture_rect_first_call_anchors_around_first_point` — 開始点まわりに
+   `GESTURE_PREALLOC_RADIUS` 分の矩形が生成されることを検証。
+3. `merge_gesture_rect_origin_stays_fixed_for_diagonal_motion_within_radius` —
+   X/Y両軸に手ぶれを伴う斜め移動50点を模した点列でも、事前確保範囲内である限り
+   矩形が1バイトも変化しないことを検証（**斜めジッター修正の直接証拠**）。
+4. `merge_gesture_rect_diagonal_up_right_and_down_right_are_equally_stable` —
+   up-right/down-right どちらの斜め方向でも同一の式・同一の安定性であることを検証
+   （軸ごとの非対称な丸めが無いことの根拠）。
+5. `merge_gesture_rect_expansion_beyond_anchor_never_shrinks_or_reclips` —
+   事前確保範囲を超えて伸びるケースでも単調拡大のみで縮小しないことを検証
+   （＝既に描画済みの点が再クリップされない、という要件の証明）。
+6. `merge_gesture_rect_is_deterministic_regardless_of_call_pattern` —
+   逐次構築でも一括構築でも最終的な矩形が同一になることを検証（決定性）。
+7. `compute_window_rect_resets_anchor_when_points_become_empty` —
+   ジェスチャー終了後に anchor がリセットされ、次のジェスチャーが別の場所で
+   始まっても前回位置を引きずらないことを検証（クリア/リセットの回帰防止）。
 
-## B. ジッター（トレンブリング）の原因診断と修正
+水平・垂直ストロークの安定性は既存の `compute_bounds_*` 系テスト（変更なし）で
+引き続き担保される。3レイヤーの幾何一致は、`render_to_memory_dc_with_snapshot`
+が単一の `offset`/`snapshot_points` を3回とも使う構造そのもの（コードレベルの保証）
+によるものであり、GDIハンドルに依存するため単体テストの対象にはしていない
+（Win32 GDI呼び出しをモックしない限りテスト不可能なため）。
 
-### 根本原因
-
-`TRAJECTORY_POINTS`（点列）と `TRAJECTORY_BOUNDS`（ウィンドウ位置/オフセット計算用の矩形）が
-**別々の `Mutex`** で管理されていた。`window_proc` の `WM_UPDATE_TRAJECTORY` ハンドラは
-
-```rust
-let bounds = TRAJECTORY_BOUNDS.lock().unwrap();
-let points = TRAJECTORY_POINTS.lock().unwrap();
-(bounds.clone(), points.clone())
-```
-
-の順で2回別々にロックを取得してスナップショットしていた。一方、`append_trajectory_point()` /
-`update_trajectory()` は点列とバウンディングを**別のブロックで逐次更新**していたため、
-レンダースレッドが `TRAJECTORY_BOUNDS` を読んだ直後・`TRAJECTORY_POINTS` を読む前に、
-マウスフックスレッドが新しい点を `TRAJECTORY_POINTS` に追加すると、
-「新しい点列」と「古いバウンディング(=古いウィンドウ位置・描画オフセット)」の
-**不整合な組み合わせ**が1フレームだけ発生する。ウィンドウ位置と描画オフセットは
-バウンディングから導出されるため、この不整合フレームでは既に描画済みの経路全体が
-一時的にずれて見え、次のフレームで正しい位置に戻る——これが連続すると
-「軌跡が震える」ように知覚される。レイヤー化(グロー/ボディ/コア3層)自体は
-同じ関数内で同じスナップショットを使っており独立してずれてはいなかったが、
-フレーム単位で全体が不整合になっていた。
-
-該当箇所（修正前）: `trajectory_renderer.rs` の `WM_UPDATE_TRAJECTORY` ハンドラ、
-`update_trajectory()`, `append_trajectory_point()`。
-
-### 修正内容
-
-1. `TRAJECTORY_POINTS` / `IS_VISIBLE` / `TRAJECTORY_BOUNDS` / `PREVIOUS_BOUNDS`（未使用の書き込み専用フィールドだったため削除）を、
-   単一の `TRAJECTORY_STATE: Mutex<TrajectoryState { points, visible }>` に統合。
-2. 純粋関数 `compute_bounds(points: &[(i32,i32)]) -> Option<RECT>` を新設し、
-   バウンディング矩形の計算式を1箇所に集約。
-3. `window_proc` は `TRAJECTORY_STATE` を**1回のロックで**スナップショットし、
-   その同じ点列から `compute_bounds()` でバウンディングを都度再計算する。
-   ウィンドウ配置・DIBクリッピング・3層すべての描画オフセットが、
-   常に同一の点列スナップショット・同一の計算式に由来するため、
-   点列とバウンディングが異なるタイミングを参照することが構造的に不可能になった。
-4. `update_trajectory()` / `append_trajectory_point()` / `clear_trajectory_display()` を
-   単一ロックでの点列・可視状態更新に書き換え。
-
-これは「過剰な平滑化でごまかす」のではなく、競合状態そのものを排除する修正であり、
-要求どおり「既に描画された経路は視覚的に固定される」「全レイヤーが同一の安定したジオメトリを使う」を満たす。
-
-### 安定性の検証（自動）
-
-`compute_bounds()` に対する単体テストを追加（`cargo test` で実行、全て pass）:
-
-- `compute_bounds_is_none_for_empty_points`
-- `compute_bounds_is_deterministic_for_same_points`
-- `compute_bounds_is_invariant_to_point_insertion_order` — 同じ点集合なら到着順に関わらず同一バウンディングになることを保証（ロック統合の効果を裏付ける）
-- `compute_bounds_matches_margin_formula`
-- `compute_bounds_grows_monotonically_as_points_are_appended` — バウンディングは単調拡大のみで縮小しない = 既存の描画済み点が再クリップされない
-
-**未検証事項**: 実機での物理マウス操作による視覚確認（震えが消えたこと）は本セッションでは実施していない。ロジック上のレースコンディションは特定・除去済みで、静的解析・自動テストでは裏付けられているが、GDI/レイヤードウィンドウの実際の描画結果を目視する物理確認は未実施。
-
-## C. 過去のマウスジェスチャー設定インポート成果物
-
-### 検索範囲
-
-`legacy`, `old`, `backup`, `migration`, `import`, `converted`, `preset`, `profile`, `settings`,
-`config`, `gesture`, `mapping` などをファイル名・内容の両方で検索。`docs/`, `artifacts/`,
-`legacy/GestureHotkeyApp-Wpf/`, リポジトリ全体を対象にした。
-
-### 候補一覧
-
-1. **`artifacts/GestureHotkeyApp-settings-batch1.gha.json`** — `formatVersion: 1`, `appName: "GestureHotkeyApp"` を持つ
-   `SettingsBundle` 形式のJSON。`config`（trajectory, ignore_exe, triggerA/B/C, triggerAColor/B/C, groups, actions 20件）と
-   `gestures`（7ジェスチャーテンプレート）を含む。現行 Rust の `SettingsBundle` / `Config` / `GestureTemplate` 構造体
-   (`src-tauri/src/config.rs`) と**フィールドが完全一致**しており、`docs/settings-export-import-plan.md` に記載の
-   `GestureHotkeyApp-settings.gha.json` という既定ファイル名パターンとも一致する。
-2. `legacy/GestureHotkeyApp-Wpf/` — .NET8/WPF による旧試作アプリのソース一式。
-   `Services/JsonConfigurationService.cs` はこのWPF版自身の設定保存ロジックであり、
-   Tauri版の `SettingsBundle` 形式とは異なるスキーマ。インポート用に整形済みの成果物ではなく、参照用ソースコード。
-3. `release-v1.0.1/config.json`, `release-v1.0.1/gestures.json` — 旧リリース配置の設定・ジェスチャー(単体ファイル、`SettingsBundle` ラッパーなし)。
-4. `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/config/config.json`, `.../config/gestures.json` — 開発用デフォルト設定
-   （`config.json` は triggerA/B/C や groups を含まない古い形式で、`gestures.json` は候補1の `gestures` と同一内容）。
-
-### 選定と理由
-
-**候補1 `artifacts/GestureHotkeyApp-settings-batch1.gha.json` を採用。**
-理由: 現行アプリの `SettingsBundle` スキーマと1対1で対応し、変換なしに構造がそのまま使える。
-`docs/settings-export-import-plan.md` が定めるバンドル形式・既定ファイル名規則とも一致しており、
-「今回の作業のために用意された」成果物として最も蓋然性が高い。WPF版ソースはスキーマが異なりインポート対象として不適当。
-
-### 適用結果
-
-- **アクティブ設定の場所（実際にインストール済みアプリが使用する場所）**:
-  `%APPDATA%\GestureHotkeyApp\config.json`, `%APPDATA%\GestureHotkeyApp\gestures.json`
-  （`ConfigManager::new()` がリリースビルドで `dirs::config_dir()/GestureHotkeyApp` を使用するため。この環境では実際に存在を確認済み。）
-- **バックアップ先**: `%APPDATA%\GestureHotkeyApp\backup-20260718-102227\config.json`,
-  `%APPDATA%\GestureHotkeyApp\backup-20260718-102227\gestures.json`
-  （置き換え前の実機検証済み設定を複製。triggerA=mouse:right, triggerB=mouse:middle, triggerC=mouse:x1 のアクション5件を含む。）
-- **適用した内容**:
-  - `config.json`: 候補1の `config` をそのまま採用し、`triggerA/B/C` のみ `"right"/"middle"/"x1"` →
-    `Config::normalized()` と同じ変換規則で `"mouse:right"/"mouse:middle"/"mouse:x1"` に正規化して書き込み。
-    `triggerAColor/B/C`（`#FF4D4F` / `#4C8DFF` / `#22A06B`）はバックアップ前の値と同一のため変更なし。
-    `groups` 4件、`actions` 21件（gesture 20件 + trigger_slot A/B/C混在、window_operation 含む）を反映。
-  - `gestures.json`: 候補1の `gestures`（7テンプレート: 左/右/下/上/下→右/上→下/G）を採用。
-    これは開発用デフォルト `config/gestures.json` と内容が完全一致しており、`diff` で確認済み。
-- **未マッピング項目**: なし。候補1のフィールドは現行スキーマの全フィールド（`trajectory`, `ignore_exe`,
-  `triggerA/B/C`, `triggerAColor/B/C`, `groups`, `actions[].{name, group_id, trigger_type, trigger_slot,
-  gesture, action_type, keystroke, modifiers, command, url, operation, ignore_exe}`, `gestures[].{name, points}`）に
-  1対1で対応し、変換不能・意味不明な項目は無かった。
-- **検証**: PowerShell (`ConvertFrom-Json` + 手動検証、`-Encoding UTF8` 指定) で、全 `actions` の
-  `group_id` が既知グループに一致、`trigger_slot` が A/B/C のいずれか、`action_type` が
-  `keystroke|command|url|window_operation` のいずれか、`triggerA/B/C` が `mouse:`/`key:` 正規化済みであることを確認（`actions=21 groups=4` / VALID）。
-  Rust 側の `Config::validate()` / `GestureTemplate::validate()` 相当のロジックを手動で再現した確認であり、
-  実際にアプリを起動して `ConfigManager::load_config()` を通した動作確認は未実施（下記「未検証事項」参照）。
-- **トリガー保持**: `triggerA/B/C` は物理検証済みのバインディング（right/middle/x1）と同一の値を維持しており、
-  今回のトリガー機能（右クリック/右ドラッグ/ミドルクリック/キーボードトリガー）の回帰は発生しない設計。
-
-## D. 回帰要件
-
-- 右クリックのコンテキストメニュー・パススルー、右ドラッグジェスチャー、Middle/X1/X2/キーボードトリガー、
-  Trigger A/B/C 永続化、トレイ動作、フックのクリーンアップに関わるコードは**一切変更していない**
-  （変更ファイルは `trajectory_renderer.rs` のみ）。
-- `ACTION_LABEL_OVERLAY_ENABLED = false` は `src-tauri/src/lib.rs:31` のまま不変（変更なし、grep で確認済み）。
-- `dist/windows/` は再生成し、既存の運用フロー（`npm run tauri build` → `npm run dist:windows`）で問題なく生成できた。
-
-## E. テスト・ビルド結果
-
-| 項目 | 結果 |
-|---|---|
-| `cargo test --lib trajectory_renderer`（フォーカステスト） | **PASS** 10/10 |
-| `cargo test`（フル） | **PASS** 32/32、0 failed |
-| `npm run build`（フロントエンド, tsc + vite） | **PASS**（`dist/index.html` ほか生成、606ms） |
-| `npm run tauri build`（リリースビルド + NSISインストーラー） | **PASS**（警告は既存のnon-snake-case警告のみ、新規エラーなし） |
-| `npm run dist:windows`（配布物エクスポート） | **PASS** |
-
-## F. `dist/windows/` 成果物
+## テスト結果
 
 ```
-OpenMouseGesture-x64.exe          12,832,768 bytes
-  sha256=f518a7c65439cd144ceb38d611522454eafa02a4a7cb2c92b318f480493473e2
-OpenMouseGesture-Setup-x64.exe     2,796,585 bytes
-  sha256=8d1f0903f38db9880f3e718c31246cadf748fd0c75964b5a4d7d3f39f9ab5b5b
+cargo test --lib trajectory_renderer
+running 17 tests ... test result: ok. 17 passed; 0 failed
+
+cargo test （フルスイート）
+running 39 tests ... test result: ok. 39 passed; 0 failed; 0 ignored
 ```
 
-`SHA256SUMS.txt` の内容と実ファイルのハッシュ一致を `sha256sum -c` で確認済み（両方 `OK`）。
-`build-info.json`: `version=0.1.0`, `gitCommit=ce3d58a7c6e12bc142f1753bae9db871f14c636d`
-（このコミットは配布物ビルド時点の直近コミットで、今回のソース変更コミット `8b47b41` はビルド後に作成したため
-`build-info.json` の `gitCommit` には未反映。再現性に影響する場合は `npm run dist:windows` を再実行してコミットSHAを更新可能——安全な再実行なので必要なら実施できるが、今回の指示範囲では既存の運用フローどおり1回の生成で完了とした。）
+既存テストの破壊なし。新規追加7テストすべて成功。
 
-## インストール状況
+## ビルド結果
 
-`dist/windows/OpenMouseGesture-Setup-x64.exe /S` によるサイレントインストールを試行したが、
-`Permission denied` で失敗（NSISインストーラーが管理者権限を要求するため、非対話シェルからは実行不可）。
-UAC昇格が唯一のブロッカーであり、これ以上は安全に自動化できないため停止した。
+- `npm run build`（フロントエンド, `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/`）: 成功。
+- `npm run tauri build`（同ディレクトリ）: 成功。
+  `target\release\GestureHotkeyApp.exe` および
+  `target\release\bundle\nsis\GestureHotkeyApp_0.1.0_x64-setup.exe` を生成。
+  警告は本修正と無関係の既存warning（未使用`mut`2件、非snake_caseフィールド/引数、
+  いずれも変更前から存在）のみで、エラーなし。
+- `npm run dist:windows`（リポジトリルート）: 成功。
+  `dist/windows/OpenMouseGesture-x64.exe`（12,834,304 bytes,
+  sha256=b642649ed416e48bbb449a116e4e46d2661a14c1f9105628698ccafc3ca7f553）
+  `dist/windows/OpenMouseGesture-Setup-x64.exe`（2,796,231 bytes,
+  sha256=9c66e7ee5539454e487f50aa92ae7205ef5e1530eb8a2277d34dcb6752b1325a）
+  `SHA256SUMS.txt`, `build-info.json`（commit=`40caac71db78ee674a12fa7b076d5134f42829f4`、
+  本タスクのコミットはビルド後に作成したため未反映。再現性が必要な場合は
+  `npm run dist:windows` を再実行すればSHAが更新される。安全な操作だが今回は未実施）。
+
+## 回帰レビュー
+
+- 右クリックの短時間コンテキストメニュー通過、右ドラッグジェスチャー、
+  Middle/X1/X2トリガー、キーボードトリガー、Trigger A/B/C永続化、トレイ挙動、
+  フック解放: `trajectory_renderer.rs` 以外のファイルは一切変更していないため、
+  これらのロジックへの影響なし。`cargo test`フルスイート（`mouse_hook`関連含む
+  39テスト）が全通過していることでも裏付け。
+- `ACTION_LABEL_OVERLAY_ENABLED = false`: 未変更。
+- デザインB（色/太さ/アルファ定数）: 未変更。3レイヤーの描画ロジック
+  （`draw_stroke_mask`呼び出し3回）も未変更。
+- `dist/windows/` エクスポート: 成功、既存フォーマットのまま。
+- 既存の `compute_bounds` 単調拡大保証（既にクリップされない）: 維持し、
+  新しい `merge_gesture_rect` も同じ不変条件を継承（テスト5で検証）。
+
+## 物理確認
+
+`dist\windows\OpenMouseGesture-x64.exe` はポータブル実行ファイルで管理者権限を
+要求しないため、UACなしで直接起動できた（`Start-Process` で起動、PID確認済み、
+プロセスは起動中のまま残してある）。ただし実際のジェスチャー描画は
+トリガーボタンを押しながらマウスを動かす必要があり、レガシー設定インポートで
+トリガー割り当てが破損している可能性があるため、自動化での再現・スクリーンショット
+検証はスコープ外かつ信頼できないと判断し、実施していない。
 
 **残っている物理確認（1件のみ）**:
-`dist\windows\OpenMouseGesture-Setup-x64.exe` を手動でダブルクリックしてUACを承認しインストールし、
-実機でジェスチャー軌跡が「濃い赤コア + 柔らかいグロー」で表示され、震えが見られないことを目視確認してください。
+現在起動中の `OpenMouseGesture-x64.exe` （またはトレイから再起動）で、
+設定済みのトリガーを使って以下を確認してください。
+1. ゆっくり右下方向に斜め線を描く
+2. ゆっくり右上方向に斜め線を描く
+3. 斜め区間を含むジグザグを描く
+4. すでに描画済みの部分が固定されたままで、震えないことを目視確認する
 
 ## 変更ファイル
 
-- `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/src/trajectory_renderer.rs`（唯一のソース変更）
-- `%APPDATA%\GestureHotkeyApp\config.json`, `%APPDATA%\GestureHotkeyApp\gestures.json`（アプリ実行時設定、リポジトリ外・Git管理対象外）
-- `%APPDATA%\GestureHotkeyApp\backup-20260718-102227\*`（バックアップ、リポジトリ外）
-- `dist/windows/*`（Git管理対象外、`dist/README.md` の方針どおり）
-- `report.md`（本ファイル、上書き更新。前回セッション分の内容は本レポートに置き換え）
+- `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/src/trajectory_renderer.rs`（唯一のソース変更、+208/-4行）
+- `report.md`（本ファイル、上書き更新）
 
 pre-existing だった `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/Cargo.toml` と
-`.../license.html` の未ステージ変更（行末コード変換の警告のみで実質差分なし）は、本タスクと無関係のため
-**変更もコミットもしていない**（作業開始時点で既に working copy に存在していた状態を保持）。
+`.../license.html` の未ステージ変更（作業開始前から存在、行末変換の警告のみ）は、
+本タスクと無関係のため**変更もコミットもしていない**。
+既存の設定ファイル（`config.json`/`gestures.json`）とそのバックアップは一切触れていない。
 
 ## Git
 
-- コミットSHA: `8b47b41bbb5f397576ca134d0bda53ddca6b9f71`
-- Push先: `origin/main`（`https://github.com/ordinal-aitech/open-mouse-gesture.git`, `ce3d58a..8b47b41 main -> main`）
-- 最終 `git status`: `Your branch is up to date with 'origin/main'.` ステージ済み変更なし。
-  未ステージで `Cargo.toml` / `license.html` の行末警告のみ残存（本タスク開始前からの既存状態、意図的に保持）。
+- コミットSHA: （このセクションはコミット後に確定値へ更新）
+- Push先: `origin/main`
+- 最終 `git status`: （コミット後に追記）
 
 ## 未検証事項
 
-- 実機物理操作による、震えが解消されたことの目視確認（上記「残っている物理確認」参照）。
-- 実機物理操作による、コアの濃さ/グローの柔らかさがデザインB意図どおり見えることの目視確認。
-- 新しい `config.json`/`gestures.json` を実際にインストール済みアプリで読み込ませ、`ConfigManager::load_config()` が
-  エラーなく起動することの実行時確認（構造的な検証はPowerShellで実施済みだが、アプリ自体の起動確認は未実施）。
-- `dist/windows/build-info.json` の `gitCommit` は今回のソース変更コミット以前のものであり、
-  完全な再現性が必要な場合は `npm run dist:windows` の再実行が必要（安全な操作、未実施）。
+- 実機での目視確認（上記「残っている物理確認」参照）。特に斜めストロークで
+  震えが実際に解消して見えることは、ユーザーの目視確認が必要（自動テストは
+  ウィンドウ移動が発生しないことをロジックレベルで証明しているが、
+  最終的な視覚的知覚はユーザー確認が必要）。
+- `GESTURE_PREALLOC_RADIUS = 500px` が実際の使用パターン（画面解像度、
+  ジェスチャーの典型的な振れ幅）に対して十分かどうかは、実機確認前は推測。
+  もし特定の環境で500pxを超える斜めジェスチャーが頻発する場合、その区間だけ
+  矩形拡大に伴う一度きりの再配置が発生しうる（既存の「単調拡大」保証により
+  既描画点のクリップは起きないが、拡大の瞬間に一度だけウィンドウ移動が
+  発生する可能性はゼロではない）。
 
 ## 判断待ち事項
 
@@ -220,6 +240,8 @@ pre-existing だった `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/
 
 ## 最終ステータス
 
-**Paused for one physical action**: 自動化可能な範囲（デザインB実装、ジッター根本原因の特定と修正、
-テスト、ビルド、配布物生成、レガシー設定の発見・バックアップ・適用、コミット・プッシュ）はすべて完了。
-UACによる手動インストール承認のみ、ユーザーの物理操作が必要。
+**Paused for one physical action**: 斜めジッターの根本原因特定（ウィンドウが
+毎フレーム移動していたこと）、修正実装（ジェスチャー単位の固定anchor）、
+新規テスト7件、フル回帰テスト（39件）、フロントエンド/Tauriビルド、
+`dist/windows` 再生成はすべて完了・成功。ユーザーによる実機での斜め線
+目視確認（上記1件）のみ残課題。
