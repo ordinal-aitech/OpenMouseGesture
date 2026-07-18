@@ -17,9 +17,22 @@ use windows::{
     core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::UI::WindowsAndMessaging::*,
 };
 
+// 軌跡ポイント列と可視状態は単一Mutexで保持する。
+// 点列とバウンディングを別々のMutexにすると、window_procでのスナップショット取得と
+// append_trajectory_point/update_trajectoryでの更新がインターリーブし、
+// 「点列は新しいがバウンディング(=ウィンドウ位置/オフセット)は古い」
+// という不整合フレームが発生し、軌跡全体が一瞬ずれて見える(トレンブリング)原因になっていた。
+// バウンディングは常にこの点列スナップショットから同じ式で再計算し、単一の情報源とする。
+struct TrajectoryState {
+    points: Vec<(i32, i32)>,
+    visible: bool,
+}
+
 static RENDERER_HWND: Mutex<Option<isize>> = Mutex::new(None);
-static TRAJECTORY_POINTS: Mutex<Vec<(i32, i32)>> = Mutex::new(Vec::new());
-static IS_VISIBLE: Mutex<bool> = Mutex::new(false);
+static TRAJECTORY_STATE: Mutex<TrajectoryState> = Mutex::new(TrajectoryState {
+    points: Vec::new(),
+    visible: false,
+});
 static WINDOW_OFFSET: Mutex<(i32, i32)> = Mutex::new((0, 0));
 static WINDOW_SIZE: Mutex<(i32, i32)> = Mutex::new((0, 0));
 static WINDOW_POS: Mutex<(i32, i32)> = Mutex::new((0, 0));
@@ -32,8 +45,6 @@ static MASK_BITMAP_BODY: Mutex<Option<isize>> = Mutex::new(None);
 static MASK_DC_CORE: Mutex<Option<isize>> = Mutex::new(None);
 static MASK_BITMAP_CORE: Mutex<Option<isize>> = Mutex::new(None);
 static LAST_RENDER_TIME: Mutex<Option<Instant>> = Mutex::new(None);
-static TRAJECTORY_BOUNDS: Mutex<Option<RECT>> = Mutex::new(None);
-static PREVIOUS_BOUNDS: Mutex<Option<RECT>> = Mutex::new(None);
 static ACTIVE_LINE_COLOR: Mutex<u32> = Mutex::new(0x004F4DFF);
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("OpenMouseGestureTrajectory");
@@ -43,12 +54,44 @@ const WINDOW_CLASS_NAME: PCWSTR = w!("OpenMouseGestureTrajectory");
 const CORE_WIDTH: i32 = 4;
 const BODY_WIDTH: i32 = 9;
 const GLOW_WIDTH: i32 = 16;
-const CORE_ALPHA: u8 = 235;
-const BODY_ALPHA: u8 = 175;
-const GLOW_ALPHA: u8 = 60;
+// デザインB: 濃く密度の高い赤コア + 半透明ボディ + 柔らかい外側グロー。
+// コアはベース色を明るく薄めず(白寄りにしない)、ほぼ不透明のまま元の線の
+// 彩度/強さを保つ。ボディはベース色そのものを中間の不透明度で。
+// グローはベース色をやや明るく伸ばし、低不透明度で自然にフェードする。
+const CORE_ALPHA: u8 = 255;
+const BODY_ALPHA: u8 = 150;
+const GLOW_ALPHA: u8 = 55;
 const BOUNDS_MARGIN: i32 = GLOW_WIDTH + 10;
 const WM_UPDATE_TRAJECTORY: u32 = WM_USER + 1;
 const MIN_FRAME_INTERVAL_MS: u64 = 16;
+
+// 点列から一貫した式でバウンディング矩形を導出する。
+// window_procでのウィンドウ配置・DIBクリッピング・描画オフセットが常にこの1つの
+// 式・1つのスナップショットから計算されることを保証し、ジオメトリのずれを防ぐ。
+fn compute_bounds(points: &[(i32, i32)]) -> Option<RECT> {
+    if points.is_empty() {
+        return None;
+    }
+
+    let mut min_x = i32::MAX;
+    let mut max_x = i32::MIN;
+    let mut min_y = i32::MAX;
+    let mut max_y = i32::MIN;
+
+    for &(x, y) in points {
+        min_x = min_x.min(x);
+        max_x = max_x.max(x);
+        min_y = min_y.min(y);
+        max_y = max_y.max(y);
+    }
+
+    Some(RECT {
+        left: min_x - BOUNDS_MARGIN,
+        top: min_y - BOUNDS_MARGIN,
+        right: max_x + BOUNDS_MARGIN,
+        bottom: max_y + BOUNDS_MARGIN,
+    })
+}
 
 unsafe fn clear_dc(dc: HDC, width: i32, height: i32) {
     let _ = PatBlt(dc, 0, 0, width, height, BLACKNESS);
@@ -209,18 +252,22 @@ fn lerp_u8(a: u8, b: u8, t: f32) -> u8 {
     (a as f32 + (b as f32 - a as f32) * t).round().clamp(0.0, 255.0) as u8
 }
 
-// ベース色から、コア(白寄りの明るいハイライト)とグロー(僅かに沈めた外光)の色相を導出する
+// デザインB: ベース色(トリガー色)から、密度の高いコア/中間ボディ/柔らかいグローの
+// 色相を導出する。コアは白へ寄せず、むしろわずかに沈めてベースより濃く密度のある
+// 印象にする(彩度・強さを保つ = 「薄い/白っぽい」にならない)。
+// ボディはベース色そのもの(半透明で支える太さ)。
+// グローはベース色をやや明るく広げ、低不透明度で外側へ自然にフェードする。
 fn derive_shades(base: (u8, u8, u8)) -> ((u8, u8, u8), (u8, u8, u8), (u8, u8, u8)) {
     let core = (
-        lerp_u8(base.0, 255, 0.45),
-        lerp_u8(base.1, 255, 0.45),
-        lerp_u8(base.2, 255, 0.45),
+        lerp_u8(base.0, 0, 0.12),
+        lerp_u8(base.1, 0, 0.12),
+        lerp_u8(base.2, 0, 0.12),
     );
     let body = base;
     let glow = (
-        lerp_u8(base.0, 0, 0.10),
-        lerp_u8(base.1, 0, 0.10),
-        lerp_u8(base.2, 0, 0.10),
+        lerp_u8(base.0, 255, 0.20),
+        lerp_u8(base.1, 255, 0.20),
+        lerp_u8(base.2, 255, 0.20),
     );
     (core, body, glow)
 }
@@ -453,12 +500,15 @@ unsafe extern "system" fn window_proc(
         WM_UPDATE_TRAJECTORY => {
             let visible = wparam.0 != 0;
             if visible {
-                // 現在のバウンディングと軌跡ポイントをスナップショット（処理中の更新を防ぐ）
-                let (snapshot_bounds, snapshot_points) = {
-                    let bounds = TRAJECTORY_BOUNDS.lock().unwrap();
-                    let points = TRAJECTORY_POINTS.lock().unwrap();
-                    (bounds.clone(), points.clone())
+                // 単一Mutexから点列を1回のロックでスナップショットし、バウンディングは
+                // 必ずこのスナップショットから再計算する。点列とバウンディングが
+                // 別々のタイミングで観測されることがなくなり、ウィンドウ位置・
+                // クリッピング・描画オフセットが常に同じジオメトリを参照する。
+                let snapshot_points = {
+                    let state = TRAJECTORY_STATE.lock().unwrap();
+                    state.points.clone()
                 };
+                let snapshot_bounds = compute_bounds(&snapshot_points);
 
                 ensure_window_matches_bounds_with_snapshot(hwnd, snapshot_bounds.clone());
                 render_to_memory_dc_with_snapshot(snapshot_bounds, snapshot_points);
@@ -598,52 +648,15 @@ pub fn init_renderer() -> Result<()> {
 }
 
 pub fn update_trajectory(points: &[(i32, i32)], visible: bool) {
-    let bounds_rect = if visible && !points.is_empty() {
-        let mut min_x = i32::MAX;
-        let mut max_x = i32::MIN;
-        let mut min_y = i32::MAX;
-        let mut max_y = i32::MIN;
-
-        for &(x, y) in points {
-            min_x = min_x.min(x);
-            max_x = max_x.max(x);
-            min_y = min_y.min(y);
-            max_y = max_y.max(y);
-        }
-
-        Some(RECT {
-            left: min_x - BOUNDS_MARGIN,
-            top: min_y - BOUNDS_MARGIN,
-            right: max_x + BOUNDS_MARGIN,
-            bottom: max_y + BOUNDS_MARGIN,
-        })
-    } else {
-        None
-    };
-
     {
-        let mut trajectory = TRAJECTORY_POINTS.lock().unwrap();
-        trajectory.clear();
+        // 点列と可視状態を単一ロックで同時に更新する（バウンディングは
+        // render側でこの点列から都度再計算するため、ここでは保持しない）。
+        let mut state = TRAJECTORY_STATE.lock().unwrap();
+        state.points.clear();
         if visible {
-            trajectory.extend_from_slice(points);
+            state.points.extend_from_slice(points);
         }
-    }
-
-    {
-        let mut is_visible = IS_VISIBLE.lock().unwrap();
-        *is_visible = visible;
-    }
-
-    {
-        let mut prev_bounds = PREVIOUS_BOUNDS.lock().unwrap();
-        let mut bounds = TRAJECTORY_BOUNDS.lock().unwrap();
-
-        if bounds_rect.is_some() {
-            *prev_bounds = *bounds;
-        } else if bounds.is_some() {
-            *prev_bounds = *bounds;
-        }
-        *bounds = bounds_rect;
+        state.visible = visible;
     }
 
     let should_render = {
@@ -681,31 +694,11 @@ pub fn update_trajectory(points: &[(i32, i32)], visible: bool) {
 
 pub fn append_trajectory_point(x: i32, y: i32) {
     {
-        let mut trajectory = TRAJECTORY_POINTS.lock().unwrap();
-        trajectory.push((x, y));
-    }
-
-    {
-        let mut is_visible = IS_VISIBLE.lock().unwrap();
-        *is_visible = true;
-    }
-
-    {
-        let mut bounds = TRAJECTORY_BOUNDS.lock().unwrap();
-
-        if let Some(ref mut rect) = *bounds {
-            rect.left = rect.left.min(x - BOUNDS_MARGIN);
-            rect.top = rect.top.min(y - BOUNDS_MARGIN);
-            rect.right = rect.right.max(x + BOUNDS_MARGIN);
-            rect.bottom = rect.bottom.max(y + BOUNDS_MARGIN);
-        } else {
-            *bounds = Some(RECT {
-                left: x - BOUNDS_MARGIN,
-                top: y - BOUNDS_MARGIN,
-                right: x + BOUNDS_MARGIN,
-                bottom: y + BOUNDS_MARGIN,
-            });
-        }
+        // 点の追加と可視化フラグの更新を単一ロックで行う。バウンディングは
+        // ここでは維持せず、render側で毎回この点列から再計算する。
+        let mut state = TRAJECTORY_STATE.lock().unwrap();
+        state.points.push((x, y));
+        state.visible = true;
     }
 
     let mut last_time = LAST_RENDER_TIME.lock().unwrap();
@@ -735,13 +728,9 @@ pub fn append_trajectory_point(x: i32, y: i32) {
 
 pub fn clear_trajectory_display() {
     {
-        let mut trajectory = TRAJECTORY_POINTS.lock().unwrap();
-        trajectory.clear();
-    }
-
-    {
-        let mut is_visible = IS_VISIBLE.lock().unwrap();
-        *is_visible = false;
+        let mut state = TRAJECTORY_STATE.lock().unwrap();
+        state.points.clear();
+        state.visible = false;
     }
 
     let hwnd = {
@@ -783,12 +772,20 @@ mod tests {
     }
 
     #[test]
-    fn derive_shades_core_is_brighter_than_body() {
+    fn derive_shades_core_is_dense_not_pale() {
+        // デザインB: コアは白へ寄せない(薄く/白っぽくしない)。ベースと同等以上に
+        // 濃く、彩度・強さを保った「密度の高い」色であること。
         let base = (0xFFu8, 0x4Du8, 0x4Fu8);
         let (core, body, glow) = derive_shades(base);
         assert_eq!(body, base);
-        assert!(core.1 > body.1, "core should be lighter than body");
-        assert!(glow.1 <= body.1, "glow should not be brighter than body");
+        assert!(
+            core.1 <= body.1 && core.2 <= body.2,
+            "core must not be lightened toward white (would look pale)"
+        );
+        assert!(
+            glow.1 >= body.1,
+            "glow may lighten outward for a soft-glow feel"
+        );
     }
 
     #[test]
@@ -805,5 +802,69 @@ mod tests {
         assert!(BODY_ALPHA < CORE_ALPHA);
         assert!((140..=205).contains(&(BODY_ALPHA as i32)));
         assert!((204..=255).contains(&(CORE_ALPHA as i32)));
+    }
+
+    #[test]
+    fn core_alpha_is_dense_near_opaque() {
+        // 「薄い/washed out」ではなく密度の高いコアであることを保証する。
+        assert!(CORE_ALPHA >= 245, "core must be close to fully opaque");
+    }
+
+    // --- ジオメトリ安定性(ジッター修正)のテスト ---
+    // compute_bounds は常に同一の点列スナップショットから同じ式で
+    // バウンディングを導出する。これにより、window/DIBの配置と描画オフセットが
+    // フレーム間で不整合になる(=軌跡が震える)ことを防ぐ。
+
+    #[test]
+    fn compute_bounds_is_none_for_empty_points() {
+        assert!(compute_bounds(&[]).is_none());
+    }
+
+    #[test]
+    fn compute_bounds_is_deterministic_for_same_points() {
+        let points = vec![(10, 20), (50, 5), (30, 80), (-10, 40)];
+        let a = compute_bounds(&points).unwrap();
+        let b = compute_bounds(&points).unwrap();
+        assert_eq!((a.left, a.top, a.right, a.bottom), (b.left, b.top, b.right, b.bottom));
+    }
+
+    #[test]
+    fn compute_bounds_is_invariant_to_point_insertion_order() {
+        // 到着順に関わらず、同じ点集合なら同じバウンディングになることを保証する。
+        // これは append_trajectory_point による逐次追加と、
+        // update_trajectory によるバルク更新が同じ結果になることの根拠。
+        let ordered = vec![(-10, 40), (10, 20), (30, 80), (50, 5)];
+        let shuffled = vec![(50, 5), (10, 20), (-10, 40), (30, 80)];
+        let a = compute_bounds(&ordered).unwrap();
+        let b = compute_bounds(&shuffled).unwrap();
+        assert_eq!((a.left, a.top, a.right, a.bottom), (b.left, b.top, b.right, b.bottom));
+    }
+
+    #[test]
+    fn compute_bounds_matches_margin_formula() {
+        let points = vec![(100, 200)];
+        let bounds = compute_bounds(&points).unwrap();
+        assert_eq!(bounds.left, 100 - BOUNDS_MARGIN);
+        assert_eq!(bounds.top, 200 - BOUNDS_MARGIN);
+        assert_eq!(bounds.right, 100 + BOUNDS_MARGIN);
+        assert_eq!(bounds.bottom, 200 + BOUNDS_MARGIN);
+    }
+
+    #[test]
+    fn compute_bounds_grows_monotonically_as_points_are_appended() {
+        // 軌跡が伸びるにつれてバウンディングは単調に拡大するのみで、
+        // 縮小して既存の点がクリップされることがないことを保証する
+        // (これも「既に描画された経路が視覚的に固定されている」ための前提)。
+        let mut points = vec![(0, 0)];
+        let mut prev = compute_bounds(&points).unwrap();
+        for p in [(5, -5), (-20, 10), (30, 30), (-5, -40)] {
+            points.push(p);
+            let next = compute_bounds(&points).unwrap();
+            assert!(next.left <= prev.left);
+            assert!(next.top <= prev.top);
+            assert!(next.right >= prev.right);
+            assert!(next.bottom >= prev.bottom);
+            prev = next;
+        }
     }
 }
