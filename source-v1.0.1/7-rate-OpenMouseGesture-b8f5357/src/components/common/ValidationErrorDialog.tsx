@@ -23,7 +23,7 @@ export function ValidationErrorDialog({
 
   const fileName = fileType === "config" ? "config.json" : "gestures.json";
   const title = `${fileName} 検証エラー`;
-  const dialogMessage = `${fileName}の書式が不正です。\n\nエディタで開いて修正するか、デフォルト設定で上書きしてください。`;
+  const dialogMessage = `${fileName}の書式が不正です。\n\nエディタで開いて修正するか、デフォルト設定で上書きしてください。\n※上書き前に現在の設定は自動的にバックアップされます。`;
 
   const handleOpenEditor = async () => {
     console.log("[ValidationErrorDialog] Opening editor for:", filePath);

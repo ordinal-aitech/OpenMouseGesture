@@ -468,6 +468,13 @@ fn get_gestures_file_path() -> Result<String, String> {
 #[tauri::command]
 fn reset_config_to_default() -> Result<(), String> {
     let manager = ConfigManager::new()?;
+    // デフォルト上書きは既存のカスタムアクションを破壊し得るため、
+    // 上書き前に必ずバックアップを取得する（復元不能な喪失を防ぐ）。
+    let backup_dir = manager.backup_before_destructive_write()?;
+    eprintln!(
+        "[config] backed up config/gestures before reset-to-default: backup={}",
+        backup_dir.display()
+    );
     let default_config = include_str!("../../config/default-config.json");
     let config: Config = serde_json::from_str(default_config)
         .map_err(|e| format!("Failed to parse default config: {}", e))?;
@@ -479,6 +486,11 @@ fn reset_config_to_default() -> Result<(), String> {
 #[tauri::command]
 fn reset_gestures_to_default() -> Result<(), String> {
     let manager = ConfigManager::new()?;
+    let backup_dir = manager.backup_before_destructive_write()?;
+    eprintln!(
+        "[config] backed up config/gestures before reset-to-default: backup={}",
+        backup_dir.display()
+    );
     let default_gestures = include_str!("../../config/default-gestures.json");
     let gestures: Vec<config::GestureTemplate> = serde_json::from_str(default_gestures)
         .map_err(|e| format!("Failed to parse default gestures: {}", e))?;

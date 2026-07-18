@@ -960,6 +960,13 @@ impl ConfigManager {
         &self.config_dir
     }
 
+    /// 破壊的な書き込み（デフォルトへのリセット等）の直前に必ず呼び出し、
+    /// 既存の config.json / gestures.json を退避する。呼び出し漏れがあると
+    /// ユーザーのカスタムアクションが復元不能なまま失われるため公開する。
+    pub fn backup_before_destructive_write(&self) -> Result<PathBuf, String> {
+        self.backup_settings_files()
+    }
+
     pub fn build_settings_bundle(&self) -> Result<SettingsBundle, String> {
         let config = self.load_config()?;
         let gestures = self.load_gestures()?;
@@ -1366,5 +1373,195 @@ mod tests {
         assert_eq!(keyboard_code_to_vk("KeyK"), Some(b'K' as u16));
         assert_eq!(keyboard_code_to_vk("Digit5"), Some(b'5' as u16));
         assert_eq!(keyboard_code_to_vk("NotAKey"), None);
+    }
+
+    fn sample_rich_config(action_count: usize) -> Config {
+        let mut config = Config {
+            triggerA: "mouse:middle".to_string(),
+            triggerB: "mouse:right".to_string(),
+            triggerC: "mouse:x1".to_string(),
+            groups: vec![
+                ActionGroup { id: "group-general".to_string(), name: "一般".to_string() },
+                ActionGroup { id: "group-clipboard".to_string(), name: "クリップボード".to_string() },
+            ],
+            ..Config::default()
+        };
+
+        for i in 0..action_count {
+            config.actions.push(Action {
+                name: format!("action-{}", i),
+                group_id: "group-general".to_string(),
+                trigger_type: "gesture".to_string(),
+                trigger_slot: ["A", "B", "C"][i % 3].to_string(),
+                gesture: format!("gesture-{}", i),
+                action_type: "keystroke".to_string(),
+                keystroke: Some("K".to_string()),
+                modifiers: Some(vec!["Ctrl".to_string()]),
+                ..Action::default()
+            });
+        }
+
+        config
+    }
+
+    #[test]
+    fn valid_custom_20_action_config_survives_load_save_unchanged() {
+        let temp_dir = unique_temp_dir("custom-20-actions-roundtrip");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let original = sample_rich_config(20);
+
+        manager.save_config(&original).expect("custom config should save");
+        let loaded = manager.load_config().expect("custom config should load");
+
+        assert_eq!(loaded.actions.len(), 20);
+        assert_eq!(
+            loaded.actions.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
+            original.actions.iter().map(|a| a.name.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn missing_optional_fields_are_filled_without_dropping_actions() {
+        let temp_dir = unique_temp_dir("missing-fields-fill");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+
+        // Hand-write JSON missing trigger_slot/group_id-normalization inputs,
+        // mirroring an older config version with fewer fields per action.
+        let raw = r#"{
+  "trajectory": true,
+  "ignore_exe": [],
+  "triggerA": "mouse:middle",
+  "triggerB": "mouse:right",
+  "triggerC": "mouse:x1",
+  "groups": [{"id": "group-general", "name": "一般"}],
+  "actions": [
+    {"name": "a1", "group_id": "group-general", "gesture": "左", "action_type": "keystroke", "keystroke": "A"},
+    {"name": "a2", "group_id": "group-general", "gesture": "右", "action_type": "keystroke", "keystroke": "B"}
+  ]
+}"#;
+        fs::write(temp_dir.join("config.json"), raw).expect("raw config should write");
+
+        let loaded = manager.load_config().expect("config with missing optional fields should load");
+        assert_eq!(loaded.actions.len(), 2);
+        // defaults fill in trigger_type/trigger_slot but do not touch the actions themselves
+        assert_eq!(loaded.actions[0].trigger_type, "gesture");
+        assert!(is_valid_trigger_slot(&loaded.actions[0].trigger_slot));
+    }
+
+    #[test]
+    fn malformed_config_is_preserved_not_silently_replaced() {
+        let temp_dir = unique_temp_dir("malformed-preserved");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let malformed = "{ this is not valid json";
+        fs::write(temp_dir.join("config.json"), malformed).expect("malformed config should write");
+
+        let result = manager.load_config();
+        assert!(result.is_err(), "malformed config must surface an error, not silently succeed");
+
+        // The original malformed file must remain untouched on disk - no
+        // silent overwrite with defaults happened.
+        let on_disk = fs::read_to_string(temp_dir.join("config.json")).expect("file should still exist");
+        assert_eq!(on_disk, malformed);
+    }
+
+    #[test]
+    fn first_run_creates_default_config() {
+        let temp_dir = unique_temp_dir("first-run-defaults");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        assert!(!temp_dir.join("config.json").exists());
+
+        let loaded = manager.load_config().expect("first run should create defaults");
+        assert!(!loaded.actions.is_empty());
+        assert!(temp_dir.join("config.json").exists());
+    }
+
+    #[test]
+    fn repeated_startup_load_is_idempotent_and_preserves_custom_actions() {
+        let temp_dir = unique_temp_dir("idempotent-startup");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let original = sample_rich_config(21);
+        manager.save_config(&original).expect("custom config should save");
+
+        let first_load = manager.load_config().expect("first load should succeed");
+        let second_load = manager.load_config().expect("second load should succeed");
+        let third_load = manager.load_config().expect("third load should succeed");
+
+        assert_eq!(first_load.actions.len(), 21);
+        assert_eq!(second_load.actions.len(), 21);
+        assert_eq!(third_load.actions.len(), 21);
+        assert_eq!(first_load, second_load);
+        assert_eq!(second_load, third_load);
+    }
+
+    #[test]
+    fn five_action_defaults_never_replace_a_valid_richer_custom_set() {
+        let temp_dir = unique_temp_dir("no-default-override");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let rich = sample_rich_config(21);
+        manager.save_config(&rich).expect("rich config should save");
+
+        // Loading multiple times must never collapse the custom action set
+        // down to the bundled 5-action default template.
+        for _ in 0..3 {
+            let loaded = manager.load_config().expect("load should succeed");
+            assert_eq!(loaded.actions.len(), 21, "custom actions must not be replaced by defaults");
+        }
+    }
+
+    #[test]
+    fn left_click_sanitation_preserves_actions_array() {
+        let temp_dir = unique_temp_dir("left-click-preserves-actions");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let mut config = sample_rich_config(21);
+        config.triggerA = "mouse:left".to_string();
+
+        // save_config rejects left-click directly, so write the file with a
+        // left-click trigger the way a hand-edited or legacy file would.
+        let raw = serde_json::to_string_pretty(&config).expect("config should serialize");
+        fs::write(temp_dir.join("config.json"), raw).expect("config should write");
+
+        let loaded = manager.load_config().expect("config should load and sanitize");
+        assert_eq!(loaded.triggerA, UNASSIGNED_TRIGGER);
+        assert_eq!(loaded.actions.len(), 21, "sanitizing left-click must not drop actions");
+    }
+
+    #[test]
+    fn destructive_reset_backs_up_existing_files_first() {
+        let temp_dir = unique_temp_dir("destructive-reset-backup");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let rich = sample_rich_config(21);
+        manager.save_config(&rich).expect("rich config should save");
+        manager
+            .save_gestures(&[GestureTemplate { name: "左".to_string(), points: vec![(0.0, 0.0), (1.0, 1.0)] }])
+            .expect("gestures should save");
+
+        let backup_dir = manager
+            .backup_before_destructive_write()
+            .expect("backup should succeed before any destructive fallback write");
+
+        let backed_up_config: Config = serde_json::from_str(
+            &fs::read_to_string(backup_dir.join("config.json")).expect("backup config should exist"),
+        )
+        .expect("backup config should parse");
+        assert_eq!(backed_up_config.actions.len(), 21, "backup must capture the full custom set");
+        assert!(backup_dir.join("gestures.json").exists());
+    }
+
+    #[test]
+    fn serialization_reload_preserves_restored_actions() {
+        let temp_dir = unique_temp_dir("serialization-reload");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let restored = sample_rich_config(21);
+
+        manager.save_config(&restored).expect("restored config should save");
+        let reloaded = manager.load_config().expect("restored config should reload");
+
+        assert_eq!(reloaded.actions.len(), restored.actions.len());
+        for (original, reloaded_action) in restored.actions.iter().zip(reloaded.actions.iter()) {
+            assert_eq!(original.name, reloaded_action.name);
+            assert_eq!(original.gesture, reloaded_action.gesture);
+            assert_eq!(original.action_type, reloaded_action.action_type);
+            assert_eq!(original.keystroke, reloaded_action.keystroke);
+        }
     }
 }

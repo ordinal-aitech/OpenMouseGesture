@@ -4,6 +4,18 @@ This changelog is reconstructed from the repository's current Git history, curre
 
 ## 2026-07-18
 
+### Config reset-to-default data-loss fix
+
+- Root cause: the `reset_config_to_default` and `reset_gestures_to_default` Tauri commands (reachable from the "デフォルトで上書き" button in `ValidationErrorDialog`, shown when `validate_config_file`/`validate_gestures_file` fails) overwrote the live `config.json`/`gestures.json` with the bundled 5-action default template with no backup step. A user's richer custom action set (a 21-action config built up over an editing session) was lost this way, because the reset path had no recoverable copy.
+- Fix: added `ConfigManager::backup_before_destructive_write`, which reuses the same timestamped `backup-YYYYMMDD-HHMMSS/` convention already used by left-click sanitization, and wired both reset commands to call it before writing the default template. The reset action itself is unchanged (it remains an explicit, user-confirmed action), but it can no longer destroy data irrecoverably.
+- Confirmed the rest of the config load/save path (`ConfigManager::load_config`, `Config::normalized`, `migrate_legacy_release_files`) was already safe: defaults are only ever written when `config.json` does not exist on disk, normalization never touches the `actions` array's contents, and parse/validation failures are surfaced as errors without touching the file on disk.
+- Restored the user's prior 21-action custom gesture/action set (from `%AppData%\GestureHotkeyApp\backup-20260718-115125\config.json`) into the live config, preserving current safe trigger-button assignments and left-click-blocking normalization; the live config had been silently reduced to the 5-action default via the unguarded reset path described above.
+- Added regression tests in `src-tauri/src/config.rs` covering: a 20/21-action custom config surviving load/save unchanged, missing optional fields being filled without dropping actions, malformed config being preserved (not silently replaced) with the error surfaced, first-run default creation, idempotent repeated startup loads, defaults never overriding a valid richer custom set, left-click sanitation preserving the actions array, backup-before-destructive-write capturing the full custom set, and serialization/reload round-tripping restored actions.
+
+Source basis:
+
+- `src-tauri/src/config.rs`, `src-tauri/src/lib.rs`, `src/components/common/ValidationErrorDialog.tsx`.
+
 ### Left-click trigger safety hardening
 
 - Blocked left-click gesture triggers end-to-end.

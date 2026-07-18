@@ -11,6 +11,7 @@ This document describes the current implementation in `main` as of July 18, 2026
 - The active application source is `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/`.
 - The app is a working Tauri 2 + React + TypeScript + Rust implementation for Windows.
 - Recent fixes on July 17-18, 2026 hardened startup reliability, tray behavior, right-click passthrough, trajectory rendering stability, and left-click trigger safety.
+- On July 18, 2026 the "reset to default" config/gestures commands were hardened to back up existing settings before overwriting, closing the gap that had let a user's custom action set be replaced by the bundled 5-action default without a recoverable copy.
 - Root-level `dist/windows/` export flow exists and is intended to be the stable distribution handoff location.
 - Some physical runtime checks remain desirable on a real Windows machine, especially around hardware-specific buttons and installer upgrade paths.
 
@@ -248,7 +249,16 @@ This preserves users from older release layouts where settings lived next to the
 
 ### Backup behavior
 
-Backups are created when the app sanitizes dangerous left-click trigger values found in an existing `config.json`. The backup directory is created under the live settings folder and contains copies of `config.json` and `gestures.json` if present.
+Backups are created under the live settings folder (`backup-YYYYMMDD-HHMMSS*/`, containing copies of `config.json` and `gestures.json` if present) whenever the app is about to perform a write that could destroy existing settings:
+
+- Sanitizing dangerous left-click trigger values found in an existing `config.json`.
+- Resetting `config.json` or `gestures.json` to the bundled defaults via the "デフォルトで上書き" (reset to default) action reachable from the validation-error dialog.
+
+### Custom action preservation rule
+
+`ConfigManager::load_config` only ever writes the bundled 5-action default template when `config.json` does not exist on disk (a genuinely new install/profile). A config file that exists and parses/validates successfully is normalized (missing optional fields filled, left-click triggers cleared) but its `actions` array is never replaced, truncated, or collapsed to the default set — normalization is idempotent and safe to run on every startup. If `config.json` exists but fails to parse or fails schema validation, the original file is left untouched on disk and the error is surfaced to the caller instead of being silently overwritten.
+
+The one path that intentionally replaces the actions list is the explicit, user-initiated "reset to default" action; as of July 18, 2026 that path always backs up the current `config.json`/`gestures.json` first (see `ConfigManager::backup_before_destructive_write`), so a reset can no longer destroy a custom action set without a recoverable copy.
 
 ### Settings bundle export/import
 
