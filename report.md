@@ -217,9 +217,10 @@ pre-existing だった `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/
 
 ## Git
 
-- コミットSHA: （このセクションはコミット後に確定値へ更新）
-- Push先: `origin/main`
-- 最終 `git status`: （コミット後に追記）
+- コミットSHA: `4fac0fe`（フルSHAは `git log -1` で確認可能）
+- Push先: `origin/main`（`https://github.com/ordinal-aitech/open-mouse-gesture.git`, `40caac7..4fac0fe main -> main`）
+- 最終 `git status`: `Your branch is up to date with 'origin/main'.` ステージ済み変更なし。
+  未ステージで `Cargo.toml` / `license.html` の行末警告のみ残存（本タスク開始前からの既存状態、意図的に保持）。
 
 ## 未検証事項
 
