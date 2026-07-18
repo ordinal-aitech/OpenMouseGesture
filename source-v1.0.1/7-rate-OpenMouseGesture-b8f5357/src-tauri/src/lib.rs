@@ -27,6 +27,7 @@ static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
 static GESTURE_ENABLED: Mutex<bool> = Mutex::new(true);
 static TRAJECTORY_ENABLED: Mutex<bool> = Mutex::new(true);
 static TRAY_ICON: OnceCell<Mutex<Option<TrayIcon>>> = OnceCell::new();
+static TOGGLE_MENU_ITEM: OnceCell<MenuItem<tauri::Wry>> = OnceCell::new();
 const ACTION_LABEL_OVERLAY_ENABLED: bool = false;
 
 #[derive(Clone, Serialize)]
@@ -510,10 +511,48 @@ fn get_gestures_validation_error() -> Result<Option<String>, String> {
     }
 }
 
+fn toggle_menu_label(enabled: bool) -> &'static str {
+    if enabled {
+        "ジェスチャーを無効化"
+    } else {
+        "ジェスチャーを有効化"
+    }
+}
+
+/// トレイメニューの明示的な項目からのみ呼び出す。単純な左クリックでは
+/// 呼ばれない（誤操作でフック全体が無音停止する不具合を防ぐため）。
+fn toggle_gesture_enabled(_app: &AppHandle) {
+    let mut enabled = GESTURE_ENABLED.lock().unwrap();
+    *enabled = !*enabled;
+    let new_state = *enabled;
+    drop(enabled);
+
+    if new_state {
+        let result = mouse_hook::install_hook();
+        eprintln!("[tray] gesture toggle -> enabled, hook install result: {:?}", result.is_ok());
+    } else {
+        let result = mouse_hook::uninstall_hook();
+        eprintln!("[tray] gesture toggle -> disabled, hook uninstall result: {:?}", result.is_ok());
+    }
+
+    update_tray_icon(new_state);
+    if let Some(item) = TOGGLE_MENU_ITEM.get() {
+        let _ = item.set_text(toggle_menu_label(new_state));
+    }
+}
+
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let quit = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
     let show = MenuItem::with_id(app, "show", "設定を開く", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let toggle = MenuItem::with_id(
+        app,
+        "toggle_gesture",
+        toggle_menu_label(*GESTURE_ENABLED.lock().unwrap()),
+        true,
+        None::<&str>,
+    )?;
+    let menu = Menu::with_items(app, &[&show, &toggle, &quit])?;
+    let _ = TOGGLE_MENU_ITEM.set(toggle);
 
     let icon = load_icon_from_bytes(include_bytes!("../icons/128x128.png"))
         .or_else(|| app.default_window_icon().cloned())
@@ -527,27 +566,21 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => app.exit(0),
             "show" => show_main_window(app),
+            "toggle_gesture" => toggle_gesture_enabled(app),
             _ => {}
         })
-        .on_tray_icon_event(|_tray, event| {
+        .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::Click {
                 button: tauri::tray::MouseButton::Left,
                 button_state: tauri::tray::MouseButtonState::Up,
                 ..
             } = event
             {
-                let mut enabled = GESTURE_ENABLED.lock().unwrap();
-                *enabled = !*enabled;
-                let new_state = *enabled;
-                drop(enabled);
-
-                if new_state {
-                    let _ = mouse_hook::install_hook();
-                } else {
-                    let _ = mouse_hook::uninstall_hook();
-                }
-
-                update_tray_icon(new_state);
+                // 単純な左クリックは通常のトレイアイコンと同様に設定ウィンドウを開くだけにする。
+                // 以前はここでジェスチャー全体を無音でON/OFFしていたため、
+                // ユーザーがアイコンを一度クリックしただけで全トリガーが反応しなくなる
+                // 不具合の原因になっていた。無効化操作は明示的なメニュー項目からのみ行う。
+                show_main_window(tray.app_handle());
             }
         })
         .build(app)?;
@@ -684,4 +717,36 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toggle_menu_label_reflects_gesture_state() {
+        assert_eq!(toggle_menu_label(true), "ジェスチャーを無効化");
+        assert_eq!(toggle_menu_label(false), "ジェスチャーを有効化");
+    }
+
+    #[test]
+    fn trajectory_enabled_toggle_is_independent_of_action_label_overlay_flag() {
+        // ACTION_LABEL_OVERLAY_ENABLED must stay false, and toggling trajectory
+        // display must not depend on it in any way.
+        assert!(!ACTION_LABEL_OVERLAY_ENABLED);
+
+        set_trajectory_enabled_internal(true);
+        assert!(is_trajectory_enabled_internal());
+        set_trajectory_enabled_internal(false);
+        assert!(!is_trajectory_enabled_internal());
+        set_trajectory_enabled_internal(true);
+    }
+
+    #[test]
+    fn show_action_label_for_action_is_a_no_op_when_overlay_disabled() {
+        let action = Action::default();
+        // Must return without touching the (unavailable in tests) native overlay window.
+        show_action_label_for_action(&action);
+        clear_action_label_overlay();
+    }
 }

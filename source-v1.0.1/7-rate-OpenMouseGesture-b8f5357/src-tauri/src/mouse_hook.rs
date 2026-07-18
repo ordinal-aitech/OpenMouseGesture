@@ -11,6 +11,68 @@ const LLKHF_INJECTED: u32 = 0x00000010;
 const SMALL_MOVE_POINTS: usize = 8;
 const PREVIEW_MIN_POINTS: usize = 6;
 const PREVIEW_INTERVAL_MS: u64 = 16;
+const DIAG_LOG_MAX_BYTES: u64 = 2_000_000;
+const DIAG_MOVE_LOG_INTERVAL_MS: u64 = 200;
+
+/// 診断ログはデフォルト無効。`OMG_DEBUG_HOOK=1` を設定して起動するか、
+/// `<config_dir>/ENABLE_HOOK_DEBUG` マーカーファイルを起動前に置いた場合のみ、
+/// `<config_dir>/hook_debug.log` へ追記する（サイズ上限に達したら切り詰め）。
+/// マーカーファイルはコンソールを使わずにGUI起動のまま診断を有効化するためのもの。
+fn diag_enabled() -> bool {
+    static ENABLED: LazyLock<bool> = LazyLock::new(|| {
+        if std::env::var("OMG_DEBUG_HOOK").map(|v| v == "1").unwrap_or(false) {
+            return true;
+        }
+        crate::config::ConfigManager::new()
+            .map(|manager| manager.config_dir().join("ENABLE_HOOK_DEBUG").exists())
+            .unwrap_or(false)
+    });
+    *ENABLED
+}
+
+fn diag_log_path() -> std::path::PathBuf {
+    static PATH: LazyLock<std::path::PathBuf> = LazyLock::new(|| {
+        crate::config::ConfigManager::new()
+            .map(|manager| manager.config_dir().join("hook_debug.log"))
+            .unwrap_or_else(|_| std::env::temp_dir().join("omg_hook_debug.log"))
+    });
+    PATH.clone()
+}
+
+fn diag_log(message: impl AsRef<str>) {
+    if !diag_enabled() {
+        return;
+    }
+    use std::io::Write;
+
+    let path = diag_log_path();
+    if let Ok(meta) = std::fs::metadata(&path) {
+        if meta.len() > DIAG_LOG_MAX_BYTES {
+            let _ = std::fs::write(&path, b"");
+        }
+    }
+
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default();
+        let _ = writeln!(file, "[{}.{:03}] {}", now.as_secs(), now.subsec_millis(), message.as_ref());
+    }
+}
+
+fn diag_should_log_move() -> bool {
+    static LAST_MOVE_LOG: Mutex<Option<Instant>> = Mutex::new(None);
+    let mut last = LAST_MOVE_LOG.lock().unwrap();
+    let now = Instant::now();
+    let should = match *last {
+        Some(previous) => now.duration_since(previous) >= Duration::from_millis(DIAG_MOVE_LOG_INTERVAL_MS),
+        None => true,
+    };
+    if should {
+        *last = Some(now);
+    }
+    should
+}
 
 static MOUSE_HOOK_HANDLE: Mutex<Option<isize>> = Mutex::new(None);
 static KEYBOARD_HOOK_HANDLE: Mutex<Option<isize>> = Mutex::new(None);
@@ -284,6 +346,7 @@ fn resolve_window_for_point(point: POINT) -> HWND {
 }
 
 fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, current_window: HWND) {
+    diag_log(format!("gesture-session begin slot={} point=({},{})", slot, point.x, point.y));
     *GESTURE_START_WINDOW.lock().unwrap() = Some(current_window.0 as isize);
     *IS_DRAGGING.lock().unwrap() = true;
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = Some(slot.to_string());
@@ -300,6 +363,12 @@ fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, curre
 }
 
 fn complete_gesture(config: &crate::config::Config, slot: &str) {
+    diag_log(format!(
+        "gesture-session end slot={} points={} gesture_enabled={}",
+        slot,
+        TRAJECTORY.lock().unwrap().len(),
+        crate::is_gesture_enabled_internal()
+    ));
     *IS_DRAGGING.lock().unwrap() = false;
     crate::emit_trajectory_update(&[], false);
 
@@ -313,6 +382,7 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
         let templates = ACTIVE_TEMPLATES.lock().unwrap().clone();
 
         if let Some(gesture_name) = crate::gesture_recognizer::recognize(&points, &templates) {
+            diag_log(format!("matcher result: recognized gesture={}", gesture_name));
             if let Some(action) = crate::find_action_for_gesture(config, slot, &gesture_name) {
                 let target_hwnd = GESTURE_START_WINDOW
                     .lock()
@@ -333,10 +403,19 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
                     }
                 }
 
-                let _ = crate::command_executor::execute_action_with_window(action, target_hwnd, true);
+                let dispatch_result =
+                    crate::command_executor::execute_action_with_window(action, target_hwnd, true);
+                diag_log(format!(
+                    "action-dispatch result: action={} ok={}",
+                    action.name,
+                    dispatch_result.is_ok()
+                ));
                 crate::emit_gesture_recognized(&gesture_name, Some(&action.action_type));
+            } else {
+                diag_log(format!("action-dispatch result: no action mapped for slot={} gesture={}", slot, gesture_name));
             }
         } else if points.len() <= SMALL_MOVE_POINTS {
+            diag_log("matcher result: no gesture recognized (small move, falling back to click-through check)");
             if slot == "A" && parse_mouse_trigger(crate::trigger_button_for_slot(config, slot)) == Some("right") {
                 let mouse_pos = points[0];
                 std::thread::spawn(move || {
@@ -344,6 +423,8 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
                     crate::command_executor::send_right_click(mouse_pos.0 as i32, mouse_pos.1 as i32);
                 });
             }
+        } else {
+            diag_log("matcher result: no gesture recognized");
         }
     }
 
@@ -362,12 +443,29 @@ unsafe extern "system" fn mouse_hook_proc(
         return CallNextHookEx(None, n_code, w_param, l_param);
     }
 
-    let mouse_data = *(l_param.0 as *const MSLLHOOKSTRUCT);
-    if (mouse_data.flags & LLMHF_INJECTED) != 0 {
-        return CallNextHookEx(None, n_code, w_param, l_param);
+    let event_type = w_param.0 as u32;
+    let is_down_up_event = matches!(
+        event_type,
+        WM_LBUTTONDOWN
+            | WM_RBUTTONDOWN
+            | WM_MBUTTONDOWN
+            | WM_XBUTTONDOWN
+            | WM_LBUTTONUP
+            | WM_RBUTTONUP
+            | WM_MBUTTONUP
+            | WM_XBUTTONUP
+    );
+    if is_down_up_event {
+        diag_log(format!("callback entered nCode={} msg={}", n_code, event_type));
     }
 
-    let event_type = w_param.0 as u32;
+    let mouse_data = *(l_param.0 as *const MSLLHOOKSTRUCT);
+    if (mouse_data.flags & LLMHF_INJECTED) != 0 {
+        if is_down_up_event {
+            diag_log("event ignored: LLMHF_INJECTED flag set (synthetic input)");
+        }
+        return CallNextHookEx(None, n_code, w_param, l_param);
+    }
 
     match event_type {
         WM_LBUTTONDOWN => {
@@ -385,13 +483,19 @@ unsafe extern "system" fn mouse_hook_proc(
             let config = ACTIVE_CONFIG.lock().unwrap().clone();
 
             if let Some(config) = config {
+                diag_log(format!(
+                    "loaded trigger mapping: A={} B={} C={}",
+                    config.triggerA, config.triggerB, config.triggerC
+                ));
                 if let Some(slot) = trigger_slot_for_mouse_down(&config, event_type, &mouse_data) {
+                    diag_log(format!("trigger match: slot={}", slot));
                     let point = POINT { x: mouse_data.pt.x, y: mouse_data.pt.y };
                     let current_window = resolve_window_for_point(point);
 
                     if current_window != HWND::default() {
                         if let Some(exe_name) = get_window_exe_name(current_window) {
                             if is_ignored_by_global_config(&exe_name) {
+                                diag_log(format!("event ignored: exe={} in ignore_exe list", exe_name));
                                 return CallNextHookEx(None, n_code, w_param, l_param);
                             }
                         }
@@ -399,7 +503,11 @@ unsafe extern "system" fn mouse_hook_proc(
 
                     begin_gesture(&config, slot, point, current_window);
                     return LRESULT(1);
+                } else {
+                    diag_log("trigger match: none");
                 }
+            } else {
+                diag_log("trigger match: skipped, ACTIVE_CONFIG is None");
             }
         }
         WM_MOUSEMOVE => {
@@ -407,6 +515,14 @@ unsafe extern "system" fn mouse_hook_proc(
                 TRAJECTORY.lock().unwrap().push((mouse_data.pt.x, mouse_data.pt.y));
                 crate::append_trajectory_point(mouse_data.pt.x, mouse_data.pt.y);
                 update_recognition_preview(false);
+                if diag_should_log_move() {
+                    diag_log(format!(
+                        "first-movement/move accepted point=({},{}) total_points={}",
+                        mouse_data.pt.x,
+                        mouse_data.pt.y,
+                        TRAJECTORY.lock().unwrap().len()
+                    ));
+                }
             }
         }
         WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP | WM_XBUTTONUP => {
@@ -556,4 +672,126 @@ pub fn uninstall_hook() -> Result<()> {
 
     PRESSED_KEYS.lock().unwrap().clear();
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Config;
+
+    /// mouse_hook のグローバル状態（IS_DRAGGING/TRAJECTORY 等）を共有するテストは
+    /// 並列実行すると干渉するため、このロックで直列化する。
+    static STATE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn config_with_triggers(a: &str, b: &str, c: &str) -> Config {
+        let mut config = Config::default();
+        config.triggerA = a.to_string();
+        config.triggerB = b.to_string();
+        config.triggerC = c.to_string();
+        config
+    }
+
+    fn mouse_data_for_xbutton(x_button: u32) -> MSLLHOOKSTRUCT {
+        MSLLHOOKSTRUCT {
+            pt: POINT { x: 0, y: 0 },
+            mouseData: x_button << 16,
+            flags: 0,
+            time: 0,
+            dwExtraInfo: 0,
+        }
+    }
+
+    #[test]
+    fn parse_mouse_trigger_accepts_legacy_and_unified_right_middle_x1() {
+        assert_eq!(parse_mouse_trigger("right"), Some("right"));
+        assert_eq!(parse_mouse_trigger("mouse:right"), Some("right"));
+        assert_eq!(parse_mouse_trigger("middle"), Some("middle"));
+        assert_eq!(parse_mouse_trigger("mouse:middle"), Some("middle"));
+        assert_eq!(parse_mouse_trigger("x1"), Some("x1"));
+        assert_eq!(parse_mouse_trigger("mouse:x1"), Some("x1"));
+        assert_eq!(parse_mouse_trigger("not-a-button"), None);
+    }
+
+    #[test]
+    fn trigger_slot_for_mouse_down_resolves_right_middle_x1_to_configured_slots() {
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+        let empty_data = mouse_data_for_xbutton(0);
+
+        assert_eq!(
+            trigger_slot_for_mouse_down(&config, WM_RBUTTONDOWN, &empty_data),
+            Some("A")
+        );
+        assert_eq!(
+            trigger_slot_for_mouse_down(&config, WM_MBUTTONDOWN, &empty_data),
+            Some("B")
+        );
+
+        let x1_data = mouse_data_for_xbutton(1);
+        assert_eq!(
+            trigger_slot_for_mouse_down(&config, WM_XBUTTONDOWN, &x1_data),
+            Some("C")
+        );
+
+        // x2 down data must not match a slot configured for x1.
+        let x2_data = mouse_data_for_xbutton(2);
+        assert_eq!(trigger_slot_for_mouse_down(&config, WM_XBUTTONDOWN, &x2_data), None);
+    }
+
+    #[test]
+    fn trigger_slot_for_mouse_down_returns_none_when_button_unassigned() {
+        // Only A/B are bound; middle has no slot at all (mirrors a live config
+        // where a slot was reassigned to a keyboard trigger).
+        let config = config_with_triggers("key:Shift+F1", "mouse:right", "mouse:x1");
+        let empty_data = mouse_data_for_xbutton(0);
+        assert_eq!(trigger_slot_for_mouse_down(&config, WM_MBUTTONDOWN, &empty_data), None);
+        assert_eq!(trigger_slot_for_mouse_down(&config, WM_RBUTTONDOWN, &empty_data), Some("B"));
+    }
+
+    #[test]
+    fn active_mouse_trigger_matches_up_mirrors_down_for_right_middle_x1() {
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+        let empty_data = mouse_data_for_xbutton(0);
+        let x1_data = mouse_data_for_xbutton(1);
+
+        assert!(active_mouse_trigger_matches_up(&config, "A", WM_RBUTTONUP, &empty_data));
+        assert!(active_mouse_trigger_matches_up(&config, "B", WM_MBUTTONUP, &empty_data));
+        assert!(active_mouse_trigger_matches_up(&config, "C", WM_XBUTTONUP, &x1_data));
+        assert!(!active_mouse_trigger_matches_up(&config, "A", WM_MBUTTONUP, &empty_data));
+    }
+
+    #[test]
+    fn gesture_session_down_move_up_transitions_reset_state() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+
+        // Reset any state left by other tests.
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *GESTURE_START_WINDOW.lock().unwrap() = None;
+
+        begin_gesture(&config, "A", POINT { x: 10, y: 20 }, HWND::default());
+        assert!(*IS_DRAGGING.lock().unwrap());
+        assert_eq!(ACTIVE_TRIGGER_SLOT.lock().unwrap().as_deref(), Some("A"));
+        assert_eq!(TRAJECTORY.lock().unwrap().as_slice(), &[(10, 20)]);
+
+        // Simulate WM_MOUSEMOVE accepting further points while dragging.
+        TRAJECTORY.lock().unwrap().push((15, 25));
+        TRAJECTORY.lock().unwrap().push((20, 30));
+        assert_eq!(TRAJECTORY.lock().unwrap().len(), 3);
+
+        complete_gesture(&config, "A");
+        assert!(!*IS_DRAGGING.lock().unwrap());
+        assert!(TRAJECTORY.lock().unwrap().is_empty());
+        assert!(ACTIVE_TRIGGER_SLOT.lock().unwrap().is_none());
+        assert!(GESTURE_START_WINDOW.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn diag_log_is_a_no_op_without_the_debug_env_var() {
+        // Bounded-logging guard: absent OMG_DEBUG_HOOK, diag_log must never touch disk.
+        // (diag_enabled() is evaluated once via LazyLock; this test only asserts the
+        // function does not panic when disabled, which is the default state in CI/prod.)
+        diag_log("test message that should be dropped when disabled");
+    }
 }
