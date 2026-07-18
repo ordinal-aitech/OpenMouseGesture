@@ -564,7 +564,13 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .show_menu_on_left_click(false)
         .tooltip("GestureHotkeyApp")
         .on_menu_event(|app, event| match event.id.as_ref() {
-            "quit" => app.exit(0),
+            "quit" => {
+                // 明示終了時は必ずフックを外し、押しっぱなし状態を残さない。
+                // プロセス終了でもOSがフックを自動解除するが、ここで先に
+                // 明示的に外すことで通常の右クリックが即座に復元されることを保証する。
+                let _ = mouse_hook::uninstall_hook();
+                app.exit(0);
+            }
             "show" => show_main_window(app),
             "toggle_gesture" => toggle_gesture_enabled(app),
             _ => {}

@@ -362,6 +362,24 @@ fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, curre
     crate::emit_trajectory_update(&[(point.x, point.y)], true);
 }
 
+/// 短いクリック（移動点数が閾値以下）で、かつそのスロットに割り当てられた
+/// ボタンが右クリックの場合にのみ、合成右クリックで通常のコンテキストメニューを
+/// 復元すべき座標を返す。スロットA/B/Cのどれに割り当てられていても動作する
+/// （以前はスロットAに右クリックがある場合のみ復元されるバグがあった）。
+fn should_replay_right_click(
+    config: &crate::config::Config,
+    slot: &str,
+    points: &[(f64, f64)],
+) -> Option<(f64, f64)> {
+    if points.len() <= SMALL_MOVE_POINTS
+        && parse_mouse_trigger(crate::trigger_button_for_slot(config, slot)) == Some("right")
+    {
+        points.first().copied()
+    } else {
+        None
+    }
+}
+
 fn complete_gesture(config: &crate::config::Config, slot: &str) {
     diag_log(format!(
         "gesture-session end slot={} points={} gesture_enabled={}",
@@ -414,15 +432,15 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
             } else {
                 diag_log(format!("action-dispatch result: no action mapped for slot={} gesture={}", slot, gesture_name));
             }
-        } else if points.len() <= SMALL_MOVE_POINTS {
-            diag_log("matcher result: no gesture recognized (small move, falling back to click-through check)");
-            if slot == "A" && parse_mouse_trigger(crate::trigger_button_for_slot(config, slot)) == Some("right") {
-                let mouse_pos = points[0];
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    crate::command_executor::send_right_click(mouse_pos.0 as i32, mouse_pos.1 as i32);
-                });
-            }
+        } else if let Some(mouse_pos) = should_replay_right_click(config, slot, &points) {
+            diag_log(format!(
+                "replay/pass-through: no gesture recognized, replaying right-click at ({:.0},{:.0}) for slot={}",
+                mouse_pos.0, mouse_pos.1, slot
+            ));
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                crate::command_executor::send_right_click(mouse_pos.0 as i32, mouse_pos.1 as i32);
+            });
         } else {
             diag_log("matcher result: no gesture recognized");
         }
@@ -670,7 +688,18 @@ pub fn uninstall_hook() -> Result<()> {
         }
     }
 
+    // フック解除時に、押しっぱなし・ジェスチャー進行中の状態を必ず消す。
+    // これがないと、ジェスチャー中に無効化/終了した場合に次回フック導入時
+    // 古い状態（掴みっぱなしのボタン等）が残ってしまう。
     PRESSED_KEYS.lock().unwrap().clear();
+    *IS_DRAGGING.lock().unwrap() = false;
+    *IS_LEFT_PRESSED.lock().unwrap() = false;
+    *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+    *GESTURE_START_WINDOW.lock().unwrap() = None;
+    TRAJECTORY.lock().unwrap().clear();
+    clear_preview_state();
+    crate::emit_trajectory_update(&[], false);
+    diag_log("hook uninstalled: held-button/gesture state cleared");
     Ok(())
 }
 
@@ -785,6 +814,74 @@ mod tests {
         assert!(TRAJECTORY.lock().unwrap().is_empty());
         assert!(ACTIVE_TRIGGER_SLOT.lock().unwrap().is_none());
         assert!(GESTURE_START_WINDOW.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn should_replay_right_click_fires_regardless_of_which_slot_holds_right() {
+        // Regression test for the reported bug: right-click's normal context menu
+        // only came back when Right happened to be bound to slot A. It must also
+        // work when Right is bound to slot B or C.
+        let short_click = [(100.0, 200.0)];
+
+        let config_a = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+        assert_eq!(
+            should_replay_right_click(&config_a, "A", &short_click),
+            Some((100.0, 200.0))
+        );
+
+        let config_b = config_with_triggers("mouse:middle", "mouse:right", "mouse:x1");
+        assert_eq!(
+            should_replay_right_click(&config_b, "B", &short_click),
+            Some((100.0, 200.0))
+        );
+
+        let config_c = config_with_triggers("mouse:middle", "mouse:x1", "mouse:right");
+        assert_eq!(
+            should_replay_right_click(&config_c, "C", &short_click),
+            Some((100.0, 200.0))
+        );
+    }
+
+    #[test]
+    fn should_replay_right_click_returns_none_once_movement_crosses_threshold() {
+        // A deliberate gesture (movement above SMALL_MOVE_POINTS) must never
+        // trigger a synthetic right-click, even though the button is "right".
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+        let long_drag: Vec<(f64, f64)> = (0..(SMALL_MOVE_POINTS as i32 + 1))
+            .map(|i| (i as f64, i as f64))
+            .collect();
+        assert_eq!(should_replay_right_click(&config, "A", &long_drag), None);
+    }
+
+    #[test]
+    fn should_replay_right_click_returns_none_for_middle_and_x1() {
+        // Middle/X1 must retain their existing (non-replayed) behavior and not
+        // be regressed into emitting a synthetic right-click.
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+        let short_click = [(50.0, 60.0)];
+        assert_eq!(should_replay_right_click(&config, "B", &short_click), None);
+        assert_eq!(should_replay_right_click(&config, "C", &short_click), None);
+    }
+
+    #[test]
+    fn uninstall_hook_clears_held_button_and_gesture_state() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+
+        *IS_DRAGGING.lock().unwrap() = true;
+        *IS_LEFT_PRESSED.lock().unwrap() = true;
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = Some("A".to_string());
+        *GESTURE_START_WINDOW.lock().unwrap() = Some(1);
+        TRAJECTORY.lock().unwrap().push((1, 2));
+        PRESSED_KEYS.lock().unwrap().insert(0x10);
+
+        uninstall_hook().unwrap();
+
+        assert!(!*IS_DRAGGING.lock().unwrap());
+        assert!(!*IS_LEFT_PRESSED.lock().unwrap());
+        assert!(ACTIVE_TRIGGER_SLOT.lock().unwrap().is_none());
+        assert!(GESTURE_START_WINDOW.lock().unwrap().is_none());
+        assert!(TRAJECTORY.lock().unwrap().is_empty());
+        assert!(PRESSED_KEYS.lock().unwrap().is_empty());
     }
 
     #[test]
