@@ -13,6 +13,7 @@ This document describes the current implementation in `main` as of July 20, 2026
 - Recent fixes on July 17-18, 2026 hardened startup reliability, tray behavior, right-click passthrough, trajectory rendering stability, and left-click trigger safety.
 - On July 18, 2026 the "reset to default" config/gestures commands were hardened to back up existing settings before overwriting, closing the gap that had let a user's custom action set be replaced by the bundled 5-action default without a recoverable copy.
 - On July 20, 2026, two user-reported defects were fixed: modifier keyboard triggers (`Shift+F1`/`Shift+F2`/`Shift+F3` and similar) now cross-check live OS modifier state instead of relying solely on tracked down/up events, and wheel actions are now resolved by active Trigger slot (A/B/C) + wheel direction instead of by left-click state, with the legacy `leftclick_wheel_up`/`leftclick_wheel_down` model removed from runtime and UI and migrated on load.
+- Later on July 20, 2026, three further user-verified gaps were fixed: wheel actions now dispatch reliably while a modifier keyboard trigger (`Shift+F1`, `Ctrl+F1`, `Alt+F1`, etc.) is held, by temporarily isolating the still-physically-held trigger modifier around dispatch; the `maximize` window operation is now a maximize/restore toggle instead of always maximizing; and a new `text` action type types saved literal Unicode text (email addresses, fixed phrases, multiline content) at the caret via `SendInput`/`KEYEVENTF_UNICODE`, kept fully distinct from `command` (external launcher).
 - Root-level `dist/windows/` export flow exists and is intended to be the stable distribution handoff location.
 - Some physical runtime checks remain desirable on a real Windows machine, especially around hardware-specific buttons, modifier keyboard triggers, wheel actions, and installer upgrade paths.
 
@@ -178,6 +179,9 @@ The backend validates these action types:
 - `command`
 - `url`
 - `window_operation`
+- `text`
+
+`command` launches an external executable, file, URI, or shell-associated target via `ShellExecuteW`; it is not a text-entry mechanism. `text` is a distinct action type that types a saved literal Unicode string (an email address, a fixed phrase, multiline content) directly at the caret in the currently targeted application; it never launches anything and never touches the clipboard. The two are intentionally kept separate and `command` is not repurposed for text entry.
 
 The two supported trigger types for actions are:
 
@@ -210,9 +214,34 @@ Current runtime implementation handles these wheel directions during an active d
 
 Each wheel tick clears the accumulated trajectory (so repeated ticks don't get misread as a gesture shape) but leaves the gesture session (the held trigger) active, so repeated ticks while the trigger stays held keep dispatching per-slot wheel actions coherently. Releasing the trigger after only wheel activity (no further pointer movement) does not additionally dispatch a gesture action, since the trajectory was cleared by the last tick.
 
-The legacy `leftclick_wheel_up`/`leftclick_wheel_down` model (an action bound to left-click held down plus wheel movement) has been removed from the runtime and the UI. On load, `Config::normalized()` migrates any existing `leftclick_wheel_up`/`leftclick_wheel_down` actions to `wheel_up`/`wheel_down` on the action's existing `trigger_slot` (defaulting to `A` if unset), reassigning to the next free slot (`A` → `B` → `C`) only if that would otherwise collide with an existing `wheel_up`/`wheel_down` action already on that slot. The action itself (name, keystroke/command/url/window operation) is never dropped by this migration.
+The legacy `leftclick_wheel_up`/`leftclick_wheel_down` model (an action bound to left-click held down plus wheel movement) has been removed from the runtime and the UI. On load, `Config::normalized()` migrates any existing `leftclick_wheel_up`/`leftclick_wheel_down` actions to `wheel_up`/`wheel_down` on the action's existing `trigger_slot` (defaulting to `A` if unset), reassigning to the next free slot (`A` → `B` → `C`) only if that would otherwise collide with an existing `wheel_up`/`wheel_down` action already on that slot. The action itself (name, keystroke/command/url/window operation/text) is never dropped by this migration.
 
 The frontend no longer exposes `wheel_click`, `x1_button`, or `x2_button` as wheel-action directions; the current low-level hook implementation in `mouse_hook.rs` only ever dispatched `wheel_up`/`wheel_down` from `WM_MOUSEWHEEL` while dragging, so these were already dead options.
+
+### Wheel actions under a modifier keyboard trigger
+
+Wheel action lookup and dispatch (`find_action_for_wheel` + `execute_action_with_window`) never distinguished mouse triggers from keyboard triggers, so on paper a wheel action bound to Trigger A should fire the same way regardless of whether Trigger A is `mouse:right` or `key:Shift+F1`. In practice, users reported that wheel actions fired reliably with a single-key trigger (`Z`) or a mouse trigger but not with a modifier-combination keyboard trigger such as `Shift+F1` held down.
+
+Root cause: a modifier-combination keyboard trigger keeps the physical modifier key (Shift/Ctrl/Alt, generic or left/right-specific) held down for the entire gesture session, including the moment a wheel action is dispatched mid-session. If the dispatched action itself sends a keystroke (the common case for wheel actions), that keystroke's `SendInput` calls landed on top of the still-physically-held trigger modifier, so the target application received a modifier-contaminated combination (for example a plain `Down` arrow arriving as `Shift+Down`, which many applications interpret completely differently, e.g. as a selection instead of a scroll). This made the wheel action appear not to fire at all from the user's perspective, even though internal dispatch technically succeeded.
+
+Fix: before dispatching a wheel action (and, defensively, before dispatching a gesture action ended by releasing only the trigger's non-modifier key while a modifier is still held), `mouse_hook.rs` computes exactly which of the active trigger's required modifier virtual-key codes are still physically held via a fresh `GetAsyncKeyState` read (`trigger_modifier_vks_from_live_keys`/`active_trigger_modifier_vks`). `command_executor::execute_action_isolated_from_modifiers` then synthesizes a `KEYEVENTF_KEYUP` for exactly those keys, runs the normal action dispatch, and synthesizes the matching key-down to restore them — all synthetic events are filtered out by the existing `LLKHF_INJECTED` check in the keyboard hook, so they never desync `PRESSED_KEYS`/trigger tracking or the active gesture session. When the active trigger has no modifiers (mouse triggers, single-key triggers like `Z`), the isolated-vks list is empty and dispatch takes the original unmodified path with no added latency.
+
+### Window operations
+
+`window_operation` actions support `minimize`, `maximize`, and `close`, resolved against the window that started the gesture (or the foreground window if none is available), the same target/root-window resolution `execute_action_with_window` already used.
+
+`maximize` is a maximize/restore toggle, not an unconditional maximize: `execute_window_operation` checks `IsZoomed` on the target window and calls `ShowWindow` with `SW_RESTORE` if it is already maximized, or `SW_SHOWMAXIMIZED` otherwise. The toggle decision itself is isolated into the pure `maximize_toggle_show_command(is_currently_maximized: bool)` in `command_executor.rs` so it is unit-testable without a real HWND. Saved `operation: "maximize"` config entries are unchanged and remain backward compatible; only the runtime behavior changed. The UI option label was updated to "最大化 / 元に戻す" to describe the toggle; `minimize` and `close` behavior is unchanged.
+
+### Text input actions
+
+`text` is a distinct action type from `command`: `command` launches an external executable/file/URI via `ShellExecuteW`, while `text` types a saved literal Unicode string directly at the caret in the currently targeted application. The two are validated, stored, and dispatched independently — `text` actions do not populate or require `command`, and vice versa.
+
+- Config schema: `Action.text: Option<String>`, backward compatible (`#[serde(default)]`; absent on older configs, which continue to load with `text: None` for every action).
+- Validation: `action_type == "text"` requires a non-blank `text` field (`Action::validate`); other action types are unaffected and do not require `text`.
+- Runtime: `command_executor::execute_text_input` sends the exact configured string via `SendInput` with `KEYEVENTF_UNICODE`, one UTF-16 code unit at a time (`unicode_code_units_for_text`), which correctly reproduces ASCII, Japanese, punctuation, spaces, and surrogate-pair (astral-plane) characters without needing a virtual-key mapping. No clipboard is read or written. Line breaks (`\n`, `\r`, or `\r\n` in the stored text) are normalized to a single `U+000D` per break, matching what a physical Enter keypress sends, so multiline edit controls insert a real line break.
+- Dispatch never leaves a modifier key logically stuck: `text` actions dispatched while a modifier keyboard trigger is held go through the same `execute_action_isolated_from_modifiers` path as wheel/gesture actions (see "Wheel actions under a modifier keyboard trigger" above), even though `KEYEVENTF_UNICODE` input is largely independent of Shift/Ctrl/Alt state.
+- UI: `ActionEditor.tsx` exposes a `テキスト入力` action-type option with a multiline textarea; `ActionList.tsx` shows a truncated, newline-collapsed preview (`getActionDescription`) rather than the full stored text, so compact lists do not needlessly expose potentially sensitive content in full.
+- Import/export: the settings bundle embeds `text` through the existing `Action`/`Config` serialization, so export/import and the custom-action-preservation rule (`ConfigManager::load_config`, `Config::normalized`) already cover it with no separate code path.
 
 ### Ignore lists
 
@@ -417,3 +446,6 @@ Recommended real-machine checks that remain useful:
 5. Verify installer upgrade, file-lock handling, and post-install launch behavior on a clean Windows machine.
 6. Assign `Shift+F1`, `Shift+F2`, `Shift+F3` to Trigger A/B/C respectively and confirm each starts and releases its own gesture reliably (including left/right Shift), and confirm a single-key trigger such as `Z` still works.
 7. Assign distinct actions to Trigger A/B/C combined with Wheel Up and Wheel Down (six combinations total) and confirm no cross-slot dispatch and no dependency on left-click state.
+8. Assign Trigger A to `Shift+F1` with distinct Wheel Up/Down actions and confirm both fire reliably while the trigger is held; repeat for `Ctrl+F1` and `Alt+F1` (including left/right variants), confirm repeated wheel ticks keep dispatching, and confirm releasing the trigger afterward does not fire an unrelated gesture action.
+9. On a normal (non-maximized) window such as a browser, invoke a `maximize` action twice in a row and confirm the first press maximizes and the second restores the window to its prior size and position.
+10. Create `text` actions containing an email address, a Japanese sentence, punctuation/spaces, and multiline content; confirm each types the exact configured text at the caret in a target application without altering the clipboard.

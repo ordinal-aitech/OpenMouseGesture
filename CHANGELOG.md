@@ -2,6 +2,39 @@
 
 This changelog is reconstructed from the repository's current Git history, current source code, and tracked project documentation. It records verified changes without inventing release numbers or dates that are not present in the repository.
 
+## 2026-07-20 (continued)
+
+### Wheel actions under a held modifier keyboard trigger
+
+- Root cause: wheel action lookup/dispatch itself never distinguished mouse triggers from keyboard triggers, but a modifier-combination keyboard trigger (e.g. `Shift+F1`) keeps the physical modifier key held for the entire gesture session, including the moment a wheel action dispatches mid-session. When the dispatched action sent its own keystroke, `SendInput` for that keystroke landed on top of the still-physically-held trigger modifier, so the target application received a modifier-contaminated combination (e.g. a plain `Down` arrow arriving as `Shift+Down`) instead of the intended one. This made the wheel action look like it "didn't fire," while single-key triggers (`Z`) and mouse triggers were unaffected because they never hold an extra modifier during dispatch.
+- Fix: added `trigger_modifier_vks_from_live_keys`/`active_trigger_modifier_vks` in `mouse_hook.rs`, which resolve exactly which of the active trigger's required modifier virtual-key codes are still physically held via a fresh `GetAsyncKeyState` read at dispatch time. Added `command_executor::execute_action_isolated_from_modifiers`, which synthesizes a `KEYEVENTF_KEYUP` for those keys immediately before dispatch and restores them (`KEYEVENTF` key-down) immediately after, wrapping the existing `execute_action_with_window`. Wired this into both wheel-action dispatch and gesture-action dispatch in `mouse_hook.rs`. All synthetic modifier events are already filtered by the existing `LLKHF_INJECTED` check in `keyboard_hook_proc`, so they never desync `PRESSED_KEYS`/trigger tracking or the active gesture session. When the active trigger has no modifiers (mouse triggers, single-key triggers), the isolated-VK list is empty and dispatch takes the original unmodified path.
+- Added regression tests covering modifier VK resolution for Shift/Ctrl/Alt (generic and left/right-specific codes), confirming single-key and mouse triggers always resolve to an empty isolation list (no behavior change for the already-working paths), and confirming a trigger's modifier is only isolated when actually held live.
+
+Source basis:
+
+- Current `src-tauri/src/mouse_hook.rs`, `src-tauri/src/command_executor.rs`.
+
+### Maximize/restore toggle
+
+- Changed the `maximize` window operation from an unconditional `ShowWindow(..., SW_SHOWMAXIMIZED)` into a maximize/restore toggle: `execute_window_operation` now checks `IsZoomed` on the resolved target window and calls `ShowWindow` with `SW_RESTORE` when already maximized, or `SW_SHOWMAXIMIZED` otherwise. The toggle decision is isolated into a pure `maximize_toggle_show_command(is_currently_maximized: bool)` so it is unit-testable without a real HWND. `minimize` and `close` are unchanged. Saved `operation: "maximize"` config entries continue to work with no config migration needed; only the runtime behavior changed. Updated the action-editor label to "最大化 / 元に戻す" to describe the toggle.
+- Added regression tests covering both toggle directions.
+
+Source basis:
+
+- Current `src-tauri/src/command_executor.rs`, `src/components/actions/ActionEditor.tsx`, `src/components/actions/ActionList.tsx`.
+
+### New `text` action type (Unicode literal text input)
+
+- Added a `text` action type, distinct from `command`: `command` remains an external executable/file/URI launcher via `ShellExecuteW` and was not changed or repurposed. `text` types a saved literal Unicode string directly at the caret of the currently targeted application.
+- Config schema: `Action.text: Option<String>`, `#[serde(default)]` for backward compatibility — configs saved before this change (with no `text` field at all) continue to load, with every action's `text` defaulting to `None`. `Action::validate` requires a non-blank `text` field when `action_type == "text"`; other action types are unaffected.
+- Runtime: added `command_executor::execute_text_input`, which sends the configured string via `SendInput`/`KEYEVENTF_UNICODE`, one UTF-16 code unit at a time (`unicode_code_units_for_text`), correctly reproducing ASCII, Japanese, punctuation, spaces, and astral-plane characters (surrogate pairs) without a virtual-key mapping and without reading or writing the clipboard. Line breaks (`\n`/`\r`/`\r\n`) are normalized to a single `U+000D` per break, matching what a physical Enter keypress sends, so multiline edit controls insert a real line break. `text` actions dispatched while a modifier keyboard trigger is held go through the same `execute_action_isolated_from_modifiers` path as wheel/gesture actions, for consistency with the fix above.
+- Frontend: `ActionEditor.tsx` adds a `テキスト入力` action-type option with a multiline textarea and its own required-field validation; `ActionList.tsx` shows a truncated, newline-collapsed preview instead of the full stored text in compact lists. `types/index.ts` adds `Action.text` and the `"text"` action type. Import/export and the existing custom-action-preservation rule cover the new field automatically through the existing `Action`/`Config` serialization, with no separate code path.
+- Added regression tests covering: `text` action_type validation acceptance, rejection of missing/blank text, Japanese/punctuation/multiline content, non-interference with `command` (each type validates independently and neither requires the other's field), serialization/reload round-tripping of Unicode and line breaks, backward-compatible loading of a config file with no `text` field at all, and pure Unicode-encoding coverage (ASCII, Japanese, astral-plane surrogate pairs, all three line-break styles, empty-text edge case) isolated from the real `SendInput` call so tests never inject live keystrokes.
+
+Source basis:
+
+- Current `src-tauri/src/config.rs`, `src-tauri/src/command_executor.rs`, `src/types/index.ts`, `src/components/actions/ActionEditor.tsx`, `src/components/actions/ActionList.tsx`.
+
 ## 2026-07-20
 
 ### Modifier keyboard trigger reliability fix

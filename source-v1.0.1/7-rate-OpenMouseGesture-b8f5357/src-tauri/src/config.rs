@@ -81,6 +81,8 @@ pub struct Action {
     pub operation: Option<String>,
     #[serde(default)]
     pub ignore_exe: Option<Vec<String>>,
+    #[serde(default)]
+    pub text: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -461,6 +463,7 @@ impl Default for Action {
             url: None,
             operation: None,
             ignore_exe: None,
+            text: None,
         }
     }
 }
@@ -501,11 +504,18 @@ impl Action {
             && self.action_type != "command"
             && self.action_type != "url"
             && self.action_type != "window_operation"
+            && self.action_type != "text"
         {
             return Err(ValidationError::InvalidValue(format!(
                 "unsupported action_type: {}",
                 self.action_type
             )));
+        }
+
+        if self.action_type == "text"
+            && self.text.as_ref().map_or(true, |s| s.trim().is_empty())
+        {
+            return Err(ValidationError::MissingRequiredField("text".to_string()));
         }
 
         if self.group_id.trim().is_empty() {
@@ -1744,5 +1754,119 @@ mod tests {
                 assert!(action.validate(&known_groups).is_ok());
             }
         }
+    }
+
+    // --- `text` action type: literal Unicode text insertion, distinct from `command` ---
+
+    fn text_action(text: &str) -> Action {
+        Action {
+            trigger_type: "gesture".to_string(),
+            trigger_slot: "A".to_string(),
+            gesture: "左".to_string(),
+            action_type: "text".to_string(),
+            text: Some(text.to_string()),
+            group_id: DEFAULT_GROUP_ID.to_string(),
+            ..Action::default()
+        }
+    }
+
+    #[test]
+    fn text_action_type_is_accepted_by_validate() {
+        let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
+        let action = text_action("hello@example.com").normalized();
+        assert!(action.validate(&known_groups).is_ok());
+    }
+
+    #[test]
+    fn text_action_requires_non_empty_text_field() {
+        let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
+
+        let missing = text_action("");
+        let missing = Action { text: None, ..missing };
+        assert!(missing.validate(&known_groups).is_err());
+
+        let blank = text_action("   \n  ").normalized();
+        assert!(blank.validate(&known_groups).is_err());
+    }
+
+    #[test]
+    fn text_action_accepts_japanese_punctuation_and_multiline_content() {
+        let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
+        let action = text_action("こんにちは、世界！\n2行目です。 記号!@#￥%").normalized();
+        assert!(action.validate(&known_groups).is_ok());
+    }
+
+    #[test]
+    fn text_action_does_not_reuse_or_require_command_field() {
+        // `text` and `command` must remain distinct: a text action does not need
+        // (and should not require) the `command` field to validate successfully.
+        let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
+        let action = text_action("plain text body").normalized();
+        assert!(action.command.is_none());
+        assert!(action.validate(&known_groups).is_ok());
+    }
+
+    #[test]
+    fn command_action_type_still_requires_no_text_field() {
+        // A `command` action must remain a launcher; it must not require or read
+        // the new `text` field, and omitting `text` must not fail validation.
+        let action = Action {
+            trigger_type: "gesture".to_string(),
+            trigger_slot: "A".to_string(),
+            gesture: "右".to_string(),
+            action_type: "command".to_string(),
+            command: Some("notepad.exe".to_string()),
+            group_id: DEFAULT_GROUP_ID.to_string(),
+            ..Action::default()
+        }
+        .normalized();
+        let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
+        assert!(action.text.is_none());
+        assert!(action.validate(&known_groups).is_ok());
+    }
+
+    #[test]
+    fn text_action_serialization_round_trips_unicode_and_line_breaks() {
+        let temp_dir = unique_temp_dir("text-action-roundtrip");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+
+        let mut config = Config::default();
+        config.actions = vec![text_action("メール: user@example.co.jp\n複数行\nテキスト").normalized()];
+        config.groups = vec![ActionGroup { id: DEFAULT_GROUP_ID.to_string(), name: "未分類".to_string() }];
+
+        manager.save_config(&config).expect("config with text action should save");
+        let reloaded = manager.load_config().expect("config with text action should reload");
+
+        assert_eq!(reloaded.actions.len(), 1);
+        assert_eq!(reloaded.actions[0].action_type, "text");
+        assert_eq!(
+            reloaded.actions[0].text.as_deref(),
+            Some("メール: user@example.co.jp\n複数行\nテキスト")
+        );
+    }
+
+    #[test]
+    fn config_without_text_field_loads_with_backward_compatible_default() {
+        // Older configs on disk never had a `text` field at all. Loading one must
+        // not fail, and every action's `text` must default to None.
+        let temp_dir = unique_temp_dir("legacy-config-no-text-field");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+
+        let legacy_json = r#"{
+            "trajectory": true,
+            "ignore_exe": [],
+            "triggerA": "mouse:right",
+            "triggerB": "mouse:middle",
+            "triggerC": "mouse:x1",
+            "groups": [{"id": "group-general", "name": "一般"}],
+            "actions": [
+                {"name": "a1", "group_id": "group-general", "gesture": "左", "action_type": "keystroke", "keystroke": "A"}
+            ]
+        }"#;
+        fs::write(temp_dir.join("config.json"), legacy_json).unwrap();
+
+        let loaded = manager.load_config().expect("legacy config without text field should load");
+        assert_eq!(loaded.actions.len(), 1);
+        assert_eq!(loaded.actions[0].text, None);
     }
 }

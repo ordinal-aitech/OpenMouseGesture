@@ -58,7 +58,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
   const [triggerSlot, setTriggerSlot] = useState<TriggerSlot>(normalizeTriggerSlot(action?.trigger_slot));
   const [gesture, setGesture] = useState(action?.gesture || "");
   const [wheelTrigger, setWheelTrigger] = useState<WheelTrigger | "">(action?.wheel_trigger || "");
-  const [actionType, setActionType] = useState<"keystroke" | "command" | "url" | "window_operation">(
+  const [actionType, setActionType] = useState<"keystroke" | "command" | "url" | "window_operation" | "text">(
     action?.action_type || "keystroke"
   );
   const [keystroke, setKeystroke] = useState(action?.keystroke || "");
@@ -66,6 +66,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
   const [command, setCommand] = useState(action?.command || "");
   const [url, setUrl] = useState(action?.url || "");
   const [operation, setOperation] = useState<"minimize" | "maximize" | "close">(action?.operation || "minimize");
+  const [text, setText] = useState(action?.text || "");
   const [ignoreExe, setIgnoreExe] = useState(action?.ignore_exe?.join("\n") || "");
   const [error, setError] = useState<string | null>(null);
 
@@ -86,6 +87,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
       setCommand(action?.command || "");
       setUrl(action?.url || "");
       setOperation(action?.operation || "minimize");
+      setText(action?.text || "");
       setIgnoreExe(action?.ignore_exe?.join("\n") || "");
       setError(null);
     }
@@ -138,6 +140,10 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
       setError("URLを入力してください");
       return false;
     }
+    if (actionType === "text" && !text.trim()) {
+      setError("テキストを入力してください");
+      return false;
+    }
 
     const nextAction: Action = {
       name: name.trim() || undefined,
@@ -152,6 +158,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
       command: actionType === "command" ? command.trim() : undefined,
       url: actionType === "url" ? url.trim() : undefined,
       operation: actionType === "window_operation" ? operation : undefined,
+      text: actionType === "text" ? text : undefined,
       ignore_exe: ignoreExe
         .split("\n")
         .map((s) => s.trim())
@@ -177,7 +184,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [name, triggerType, triggerSlot, gesture, wheelTrigger, actionType, keystroke, modifiers, command, url, operation, ignoreExe]);
+  }, [name, triggerType, triggerSlot, gesture, wheelTrigger, actionType, keystroke, modifiers, command, url, operation, text, ignoreExe]);
 
   return (
     <div className="action-editor">
@@ -265,13 +272,22 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
           <select
             id="action-type"
             value={actionType}
-            onChange={(e) => setActionType(e.target.value as "keystroke" | "command" | "url" | "window_operation")}
+            onChange={(e) =>
+              setActionType(e.target.value as "keystroke" | "command" | "url" | "window_operation" | "text")
+            }
           >
             <option value="keystroke">ホットキー</option>
             <option value="command">コマンド</option>
             <option value="url">URL</option>
             <option value="window_operation">ウィンドウ操作</option>
+            <option value="text">テキスト入力</option>
           </select>
+          {actionType === "command" && (
+            <p className="field-hint">実行ファイル・ファイル・URI・関連付けされたコマンドを起動します。</p>
+          )}
+          {actionType === "text" && (
+            <p className="field-hint">保存したテキストをそのまま対象アプリのカーソル位置へ入力します。</p>
+          )}
         </div>
 
         {actionType === "keystroke" && (
@@ -330,9 +346,22 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
             <label htmlFor="action-operation">操作</label>
             <select id="action-operation" value={operation} onChange={(e) => setOperation(e.target.value as "minimize" | "maximize" | "close")}>
               <option value="minimize">最小化</option>
-              <option value="maximize">最大化</option>
+              <option value="maximize">最大化 / 元に戻す</option>
               <option value="close">閉じる</option>
             </select>
+          </div>
+        )}
+
+        {actionType === "text" && (
+          <div className="form-group">
+            <label htmlFor="action-text">入力するテキスト</label>
+            <textarea
+              id="action-text"
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={"example@example.com\nよろしくお願いいたします。"}
+              rows={5}
+            />
           </div>
         )}
 

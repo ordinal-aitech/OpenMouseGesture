@@ -275,6 +275,44 @@ fn keys_with_live_modifiers(keys: &HashSet<u16>) -> HashSet<u16> {
     merged
 }
 
+/// 修飾キー名（"Shift"/"Ctrl"/"Alt"）に対して、`live_keys` の中で実際に押されて
+/// いる方の具体的な仮想キーコード（総称コードまたは左右いずれか）を1つ返す。
+/// アクション送出前に一時解除・送出後に復元するキーコードを特定するために使う。
+fn modifier_vk_from_live_keys(modifier: &str, live_keys: &HashSet<u16>) -> Option<u16> {
+    let candidates: &[u16] = match modifier {
+        "Shift" => &[0xA0, 0xA1, 0x10],
+        "Ctrl" => &[0xA2, 0xA3, 0x11],
+        "Alt" => &[0xA4, 0xA5, 0x12],
+        _ => &[],
+    };
+    candidates.iter().copied().find(|vk| live_keys.contains(vk))
+}
+
+/// 指定したキーボードトリガー文字列（例: "key:Shift+F1"）が要求する修飾キーの
+/// うち、`live_keys` の時点で実際に物理的に押されているものの仮想キーコード
+/// 一覧を返す。トリガーがキーボードでない、または修飾キーを持たない場合は
+/// 空を返す。
+fn trigger_modifier_vks_from_live_keys(trigger: &str, live_keys: &HashSet<u16>) -> Vec<u16> {
+    let Some((modifiers, _code)) = crate::config::parse_keyboard_trigger(trigger) else {
+        return Vec::new();
+    };
+    modifiers
+        .iter()
+        .filter_map(|modifier| modifier_vk_from_live_keys(modifier, live_keys))
+        .collect()
+}
+
+/// 現在アクティブな Trigger スロットに割り当てられたキーボードトリガーが、
+/// 今まさに物理的に押しっぱなしの修飾キー（Shift/Ctrl/Alt）を返す。
+/// ホイールアクションやジェスチャーアクションの送出直前に呼び、送出中だけ
+/// それらの修飾キーを一時的に「離した」ことにするために使う
+/// （`command_executor::execute_action_isolated_from_modifiers` 参照）。
+/// マウストリガーや単一キートリガー（修飾キーなし）では常に空を返す。
+fn active_trigger_modifier_vks(config: &crate::config::Config, slot: &str) -> Vec<u16> {
+    let trigger = crate::trigger_button_for_slot(config, slot);
+    trigger_modifier_vks_from_live_keys(trigger, &live_modifier_vks())
+}
+
 fn keyboard_trigger_active(trigger: &str, keys: &HashSet<u16>) -> bool {
     let Some((modifiers, code)) = crate::config::parse_keyboard_trigger(trigger) else {
         return false;
@@ -450,8 +488,13 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
                     }
                 }
 
-                let dispatch_result =
-                    crate::command_executor::execute_action_with_window(action, target_hwnd, true);
+                let modifier_vks = active_trigger_modifier_vks(config, slot);
+                let dispatch_result = crate::command_executor::execute_action_isolated_from_modifiers(
+                    action,
+                    target_hwnd,
+                    true,
+                    &modifier_vks,
+                );
                 diag_log(format!(
                     "action-dispatch result: action={} ok={}",
                     action.name,
@@ -592,8 +635,13 @@ unsafe extern "system" fn mouse_hook_proc(
                     ));
                     if let Some(action) = crate::find_action_for_wheel(&config, &slot, wheel_direction) {
                         let target_hwnd = GESTURE_START_WINDOW.lock().unwrap().map(|h| HWND(h as *mut _));
-                        let dispatch_result =
-                            crate::command_executor::execute_action_with_window(action, target_hwnd, false);
+                        let modifier_vks = active_trigger_modifier_vks(&config, &slot);
+                        let dispatch_result = crate::command_executor::execute_action_isolated_from_modifiers(
+                            action,
+                            target_hwnd,
+                            false,
+                            &modifier_vks,
+                        );
                         diag_log(format!(
                             "wheel-action-dispatch result: action={} ok={}",
                             action.name,
@@ -1124,5 +1172,74 @@ mod tests {
         // (diag_enabled() is evaluated once via LazyLock; this test only asserts the
         // function does not panic when disabled, which is the default state in CI/prod.)
         diag_log("test message that should be dropped when disabled");
+    }
+
+    // --- Modifier-trigger wheel dispatch: physical-modifier isolation ---
+    //
+    // Root cause: while a modifier keyboard trigger (e.g. Shift+F1) is held, the
+    // physical Shift/Ctrl/Alt key is still down at the moment a wheel action (or a
+    // gesture action ended by releasing only the non-modifier key) is dispatched.
+    // If dispatch sends its own keystroke unmodified, the still-held physical
+    // modifier contaminates it (e.g. a plain "Down" arrow becomes "Shift+Down" in
+    // the target app), which looks like "the wheel action doesn't fire" from a
+    // user's perspective even though our own dispatch technically succeeded.
+    // These tests cover the pure VK-resolution logic that identifies exactly which
+    // modifier keys must be temporarily released/restored around dispatch.
+
+    #[test]
+    fn modifier_vk_from_live_keys_prefers_whichever_specific_or_generic_code_is_actually_held() {
+        assert_eq!(
+            modifier_vk_from_live_keys("Shift", &HashSet::from([VK_LSHIFT])),
+            Some(VK_LSHIFT)
+        );
+        assert_eq!(
+            modifier_vk_from_live_keys("Shift", &HashSet::from([VK_RSHIFT])),
+            Some(VK_RSHIFT)
+        );
+        assert_eq!(
+            modifier_vk_from_live_keys("Shift", &HashSet::from([VK_SHIFT])),
+            Some(VK_SHIFT)
+        );
+        assert_eq!(modifier_vk_from_live_keys("Shift", &HashSet::new()), None);
+        assert_eq!(modifier_vk_from_live_keys("NotAModifier", &HashSet::from([VK_LSHIFT])), None);
+    }
+
+    #[test]
+    fn trigger_modifier_vks_from_live_keys_resolves_shift_ctrl_alt_combinations() {
+        assert_eq!(
+            trigger_modifier_vks_from_live_keys("key:Shift+F1", &HashSet::from([VK_LSHIFT, VK_F1])),
+            vec![VK_LSHIFT]
+        );
+        assert_eq!(
+            trigger_modifier_vks_from_live_keys("key:Ctrl+F1", &HashSet::from([VK_LCONTROL, VK_F1])),
+            vec![VK_LCONTROL]
+        );
+        assert_eq!(
+            trigger_modifier_vks_from_live_keys("key:Alt+F1", &HashSet::from([VK_LMENU, VK_F1])),
+            vec![VK_LMENU]
+        );
+    }
+
+    #[test]
+    fn trigger_modifier_vks_from_live_keys_is_empty_for_single_key_and_mouse_triggers() {
+        // Single-key triggers (e.g. "Z") and mouse triggers must never have any
+        // modifier isolated/restored around them; there is nothing to contaminate.
+        assert!(trigger_modifier_vks_from_live_keys("key:KeyZ", &HashSet::from([VK_Z])).is_empty());
+        assert!(trigger_modifier_vks_from_live_keys("mouse:right", &HashSet::from([VK_LSHIFT])).is_empty());
+    }
+
+    #[test]
+    fn trigger_modifier_vks_from_live_keys_only_returns_modifiers_actually_held_live() {
+        // The trigger requires Shift, but Shift is not currently held live (e.g. it
+        // was already released) -- nothing should be isolated in that case.
+        assert!(trigger_modifier_vks_from_live_keys("key:Shift+F1", &HashSet::from([VK_F1])).is_empty());
+    }
+
+    #[test]
+    fn active_trigger_modifier_vks_is_empty_for_mouse_trigger_slot() {
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+        // Cannot simulate a physically-held key in CI, but a mouse-trigger slot
+        // must resolve to no modifiers regardless of live keyboard state.
+        assert!(active_trigger_modifier_vks(&config, "A").is_empty());
     }
 }

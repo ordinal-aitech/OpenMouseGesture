@@ -99,10 +99,15 @@ export function ActionList({
       case "window_operation": {
         const operationLabels: Record<string, string> = {
           minimize: "最小化",
-          maximize: "最大化",
+          maximize: "最大化 / 元に戻す",
           close: "閉じる",
         };
         return operationLabels[action.operation || ""] || "";
+      }
+      case "text": {
+        const raw = (action.text || "").replace(/\r\n|\r|\n/g, " ⏎ ");
+        const maxLength = 30;
+        return raw.length > maxLength ? `${raw.slice(0, maxLength)}…` : raw;
       }
       default:
         return action.action_type || "";

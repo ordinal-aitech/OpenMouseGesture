@@ -53,7 +53,77 @@ pub fn execute_action_with_window(
         "command" => execute_command(action),
         "url" => execute_browser(action),
         "window_operation" => execute_window_operation(action, effective_window),
+        "text" => execute_text_input(action),
         _ => Err(format!("Unknown action type: {}", action.action_type)),
+    }
+}
+
+/// トリガーとして使われている物理修飾キー（Shift/Ctrl/Alt の左右いずれか）が
+/// アクション実行中も押されたままだと、送信するキーストロークに意図せず
+/// 混入し（例: 送信予定の矢印キーが物理Shiftと組み合わさり範囲選択になる等）、
+/// 結果としてアクションが「効かない」ように見える。呼び出し側
+/// （`mouse_hook.rs`）が、その時点で物理的に押されているトリガー修飾キーの
+/// 仮想キーコード一覧を渡した場合のみ、実行前に一時的に離した状態へ書き換え、
+/// 実行後に元の押下状態へ復元する。渡されなければ通常の `execute_action_with_window`
+/// と同じ経路で即座に実行する。
+pub fn execute_action_isolated_from_modifiers(
+    action: &Action,
+    target_window: Option<HWND>,
+    activate_window: bool,
+    held_trigger_modifier_vks: &[u16],
+) -> std::result::Result<(), String> {
+    if held_trigger_modifier_vks.is_empty() {
+        return execute_action_with_window(action, target_window, activate_window);
+    }
+
+    release_held_modifiers(held_trigger_modifier_vks);
+    std::thread::sleep(std::time::Duration::from_millis(5));
+
+    let result = execute_action_with_window(action, target_window, activate_window);
+
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    restore_held_modifiers(held_trigger_modifier_vks);
+
+    result
+}
+
+fn synthesize_modifier_key_event(vk: u16, key_up: bool) {
+    let virtual_key = VIRTUAL_KEY(vk);
+    let mut flags = KEYEVENTF_SCANCODE;
+    if key_up {
+        flags |= KEYEVENTF_KEYUP;
+    }
+    if is_extended_key(virtual_key) {
+        flags |= KEYEVENTF_EXTENDEDKEY;
+    }
+
+    let input = INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 {
+            ki: KEYBDINPUT {
+                wVk: VIRTUAL_KEY(0),
+                wScan: vk_to_scan(virtual_key),
+                dwFlags: flags,
+                time: 0,
+                dwExtraInfo: 0,
+            },
+        },
+    };
+
+    unsafe {
+        let _ = SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+fn release_held_modifiers(vks: &[u16]) {
+    for &vk in vks {
+        synthesize_modifier_key_event(vk, true);
+    }
+}
+
+fn restore_held_modifiers(vks: &[u16]) {
+    for &vk in vks.iter().rev() {
+        synthesize_modifier_key_event(vk, false);
     }
 }
 
@@ -476,6 +546,80 @@ fn execute_browser(action: &Action) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// `text` アクション: クリップボードを一切使わず、`KEYEVENTF_UNICODE` による
+/// Win32合成キー入力で、設定済みの文字列をそのままキャレット位置へ入力する。
+/// 日本語・記号・改行など仮想キーコードに単純対応しない文字も含めて送信できる。
+/// `command` アクション（外部プログラム起動）とは明確に別物である。
+fn execute_text_input(action: &Action) -> std::result::Result<(), String> {
+    let text = action
+        .text
+        .as_ref()
+        .ok_or("Text action requires text field")?;
+
+    if text.trim().is_empty() {
+        return Err("Text action requires non-empty text field".to_string());
+    }
+
+    eprintln!("[DEBUG] Executing text input: {} chars", text.chars().count());
+    send_unicode_text(text)
+}
+
+/// 送信対象のUTF-16コード単位列を組み立てる純粋関数。改行は `\r\n`/`\r`/`\n` の
+/// いずれであっても、Enterキーが実際に送るのと同じ `U+000D` 1個に正規化する
+/// （多くのマルチライン編集コントロールは `WM_CHAR(0x0D)` を改行として扱う）。
+/// サロゲートペアは `encode_utf16` がそのまま2コード単位として展開するため、
+/// 基本多言語面外の文字も一連の `SendInput` 呼び出しで正しく再現できる。
+fn unicode_code_units_for_text(text: &str) -> Vec<u16> {
+    let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
+    normalized
+        .encode_utf16()
+        .map(|unit| if unit == '\n' as u16 { 0x000D } else { unit })
+        .collect()
+}
+
+fn send_unicode_text(text: &str) -> std::result::Result<(), String> {
+    unsafe {
+        for code_unit in unicode_code_units_for_text(text) {
+            let mut down = INPUT {
+                r#type: INPUT_KEYBOARD,
+                Anonymous: INPUT_0 {
+                    ki: KEYBDINPUT {
+                        wVk: VIRTUAL_KEY(0),
+                        wScan: code_unit,
+                        dwFlags: KEYEVENTF_UNICODE,
+                        time: 0,
+                        dwExtraInfo: 0,
+                    },
+                },
+            };
+            let sent_down = SendInput(
+                std::slice::from_ref(&down),
+                std::mem::size_of::<INPUT>() as i32,
+            );
+            if sent_down != 1 {
+                return Err(format!(
+                    "SendInput(text-down) failed for code unit {:#06x}",
+                    code_unit
+                ));
+            }
+
+            down.Anonymous.ki.dwFlags |= KEYEVENTF_KEYUP;
+            let sent_up = SendInput(
+                std::slice::from_ref(&down),
+                std::mem::size_of::<INPUT>() as i32,
+            );
+            if sent_up != 1 {
+                return Err(format!(
+                    "SendInput(text-up) failed for code unit {:#06x}",
+                    code_unit
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn send_right_click(x: i32, y: i32) {
     unsafe {
         let mut inputs = [INPUT::default(); 2];
@@ -501,6 +645,17 @@ pub fn send_right_click(x: i32, y: i32) {
         };
 
         let _ = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+/// `maximize` 操作の実体は最大化/元に戻すのトグルである。実HWNDを介さず
+/// `IsZoomed` 相当の真偽値だけから ShowWindow に渡すコマンドを決定するため、
+/// 実ウィンドウを用意できないテスト環境でも判定ロジック単体を検証できる。
+fn maximize_toggle_show_command(is_currently_maximized: bool) -> SHOW_WINDOW_CMD {
+    if is_currently_maximized {
+        SW_RESTORE
+    } else {
+        SW_SHOWMAXIMIZED
     }
 }
 
@@ -613,7 +768,13 @@ fn execute_window_operation(
                 );
             }
             "maximize" => {
-                let result = ShowWindow(target_hwnd, SW_SHOWMAXIMIZED);
+                let is_zoomed = IsZoomed(target_hwnd).as_bool();
+                let show_cmd = maximize_toggle_show_command(is_zoomed);
+                eprintln!(
+                    "[DEBUG] maximize toggle: currently_zoomed={} show_cmd={}",
+                    is_zoomed, show_cmd.0
+                );
+                let result = ShowWindow(target_hwnd, show_cmd);
                 if !result.as_bool() {
                     eprintln!(
                         "[DEBUG] ShowWindow returned false, but operation may have succeeded"
@@ -633,4 +794,83 @@ fn execute_window_operation(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- maximize/restore toggle ---
+    //
+    // Direct HWND manipulation is impractical in a unit test (no real window to
+    // maximize), so the show-command decision is isolated into a pure function
+    // of "is this window currently maximized" and tested against that alone.
+
+    #[test]
+    fn maximize_toggle_shows_maximized_when_not_currently_maximized() {
+        assert_eq!(maximize_toggle_show_command(false), SW_SHOWMAXIMIZED);
+    }
+
+    #[test]
+    fn maximize_toggle_restores_when_currently_maximized() {
+        assert_eq!(maximize_toggle_show_command(true), SW_RESTORE);
+    }
+
+    // --- text action: Unicode code-unit encoding for SendInput ---
+    //
+    // `send_unicode_text` itself calls the real Win32 SendInput API, which would
+    // inject live keystrokes into whatever window has focus during `cargo test`.
+    // The encoding logic is isolated into `unicode_code_units_for_text` so it can
+    // be verified without touching the OS input queue.
+
+    #[test]
+    fn unicode_code_units_round_trips_ascii_email_address() {
+        let units = unicode_code_units_for_text("user@example.com");
+        let decoded = String::from_utf16(&units).unwrap();
+        assert_eq!(decoded, "user@example.com");
+    }
+
+    #[test]
+    fn unicode_code_units_round_trips_japanese_text() {
+        let units = unicode_code_units_for_text("こんにちは、世界！");
+        let decoded = String::from_utf16(&units).unwrap();
+        assert_eq!(decoded, "こんにちは、世界！");
+    }
+
+    #[test]
+    fn unicode_code_units_round_trips_astral_plane_characters_as_surrogate_pairs() {
+        // An emoji outside the Basic Multilingual Plane must be encoded as a
+        // UTF-16 surrogate pair (two u16 code units), exactly as encode_utf16
+        // already does, so it types correctly via sequential SendInput calls.
+        let units = unicode_code_units_for_text("hi\u{1F600}bye");
+        assert_eq!(units.len(), "hi".len() + 2 + "bye".len());
+        let decoded = String::from_utf16(&units).unwrap();
+        assert_eq!(decoded, "hi\u{1F600}bye");
+    }
+
+    #[test]
+    fn unicode_code_units_normalizes_all_line_break_styles_to_carriage_return() {
+        // \n, \r, and \r\n must all normalize to a single U+000D per line break,
+        // matching what a physical Enter keypress sends (WM_CHAR(0x0D)), so
+        // multiline edit controls insert a real line break either way.
+        let lf = unicode_code_units_for_text("a\nb");
+        let cr = unicode_code_units_for_text("a\rb");
+        let crlf = unicode_code_units_for_text("a\r\nb");
+
+        assert_eq!(lf, vec!['a' as u16, 0x000D, 'b' as u16]);
+        assert_eq!(cr, lf);
+        assert_eq!(crlf, lf);
+    }
+
+    #[test]
+    fn unicode_code_units_handles_punctuation_and_spaces() {
+        let units = unicode_code_units_for_text("Hi there! (100%) #1 -- ok?");
+        let decoded = String::from_utf16(&units).unwrap();
+        assert_eq!(decoded, "Hi there! (100%) #1 -- ok?");
+    }
+
+    #[test]
+    fn unicode_code_units_for_empty_text_is_empty() {
+        assert!(unicode_code_units_for_text("").is_empty());
+    }
 }

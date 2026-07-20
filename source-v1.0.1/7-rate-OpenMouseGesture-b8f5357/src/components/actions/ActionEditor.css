@@ -119,6 +119,12 @@
   font-size: var(--font-size-sm);
 }
 
+.field-hint {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  margin: var(--spacing-xs, 4px) 0 0;
+}
+
 .editor-actions {
   display: flex;
   justify-content: flex-end;

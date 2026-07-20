@@ -22,13 +22,15 @@ export interface Action {
   trigger_slot?: TriggerSlot;
   gesture: string;
   wheel_trigger?: WheelTrigger;
-  action_type: "keystroke" | "command" | "url" | "window_operation";
+  action_type: "keystroke" | "command" | "url" | "window_operation" | "text";
   keystroke?: string;
   modifiers?: string[];
   command?: string;
   url?: string;
   operation?: "minimize" | "maximize" | "close";
   ignore_exe?: string[];
+  /** `text` アクション専用: キャレット位置へそのまま入力するリテラル文字列。 */
+  text?: string;
 }
 
 export interface Config {
