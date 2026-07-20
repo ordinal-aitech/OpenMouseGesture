@@ -4,7 +4,7 @@
 
 OpenMouseGesture is a Windows mouse-gesture utility rebuilt as a Tauri desktop app. It is intended for users who want global gesture input, per-gesture action mapping, tray-based background operation, and portable distribution artifacts that can be rebuilt from source.
 
-This document describes the current implementation in `main` as of July 20, 2026. It is the project-level specification for the repository, not a task log.
+This document describes the current implementation in `main` as of July 20, 2026 (continued). It is the project-level specification for the repository, not a task log.
 
 ## Current Status
 
@@ -14,6 +14,7 @@ This document describes the current implementation in `main` as of July 20, 2026
 - On July 18, 2026 the "reset to default" config/gestures commands were hardened to back up existing settings before overwriting, closing the gap that had let a user's custom action set be replaced by the bundled 5-action default without a recoverable copy.
 - On July 20, 2026, two user-reported defects were fixed: modifier keyboard triggers (`Shift+F1`/`Shift+F2`/`Shift+F3` and similar) now cross-check live OS modifier state instead of relying solely on tracked down/up events, and wheel actions are now resolved by active Trigger slot (A/B/C) + wheel direction instead of by left-click state, with the legacy `leftclick_wheel_up`/`leftclick_wheel_down` model removed from runtime and UI and migrated on load.
 - Later on July 20, 2026, three further user-verified gaps were fixed: wheel actions now dispatch reliably while a modifier keyboard trigger (`Shift+F1`, `Ctrl+F1`, `Alt+F1`, etc.) is held, by temporarily isolating the still-physically-held trigger modifier around dispatch; the `maximize` window operation is now a maximize/restore toggle instead of always maximizing; and a new `text` action type types saved literal Unicode text (email addresses, fixed phrases, multiline content) at the caret via `SendInput`/`KEYEVENTF_UNICODE`, kept fully distinct from `command` (external launcher).
+- Also on July 20, 2026, the action editor's `グループ` field was changed from a read-only label to an editable dropdown listing every currently configured group; editing an existing action and choosing a different group now moves it into that group's section on save, without deleting/recreating the action or losing any other field.
 - Root-level `dist/windows/` export flow exists and is intended to be the stable distribution handoff location.
 - Some physical runtime checks remain desirable on a real Windows machine, especially around hardware-specific buttons, modifier keyboard triggers, wheel actions, and installer upgrade paths.
 
@@ -242,6 +243,14 @@ Fix: before dispatching a wheel action (and, defensively, before dispatching a g
 - Dispatch never leaves a modifier key logically stuck: `text` actions dispatched while a modifier keyboard trigger is held go through the same `execute_action_isolated_from_modifiers` path as wheel/gesture actions (see "Wheel actions under a modifier keyboard trigger" above), even though `KEYEVENTF_UNICODE` input is largely independent of Shift/Ctrl/Alt state.
 - UI: `ActionEditor.tsx` exposes a `テキスト入力` action-type option with a multiline textarea; `ActionList.tsx` shows a truncated, newline-collapsed preview (`getActionDescription`) rather than the full stored text, so compact lists do not needlessly expose potentially sensitive content in full.
 - Import/export: the settings bundle embeds `text` through the existing `Action`/`Config` serialization, so export/import and the custom-action-preservation rule (`ConfigManager::load_config`, `Config::normalized`) already cover it with no separate code path.
+
+### Action groups
+
+Each action has a `group_id` referencing an entry in `Config.groups` (`{ id, name }`); the action list UI (`ActionList.tsx`) sections actions by this ID. Group membership is edited from the action editor (`ActionEditor.tsx`), not just at creation time: the `グループ` field is a `<select>` populated from the app's currently configured groups (stable `id` values, user-visible `name` labels), styled like the other trigger controls. For an existing action it initializes to that action's current group (or the first configured group if the stored `group_id` no longer matches any known group); for a new action it initializes to the group the "+" button was pressed from. Choosing a different group and saving updates only the `group_id` field on the same action object — the action's identity, ordering position in the underlying `actions` array, and every other field are unchanged, so it disappears from its old group section and reappears exactly once under the new one on the next state refresh.
+
+Group creation and deletion remain in the existing group-management UI (the "+ グループを追加" toolbar button and inline group-name rename); the group dropdown in the action editor only reassigns an existing action to an existing group.
+
+If a `group_id` on disk does not match any group in `Config.groups` (for example after manual edits or import of a bundle referencing a deleted group), `normalize_groups_and_actions` in `src-tauri/src/config.rs` already falls back that action to the default `group-uncategorized` group during normalization rather than dropping it or failing to load; this same fallback covers the action editor's dropdown defensively picking a valid initial selection.
 
 ### Ignore lists
 

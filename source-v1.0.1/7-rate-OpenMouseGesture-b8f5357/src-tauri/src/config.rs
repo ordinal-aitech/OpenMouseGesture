@@ -1636,6 +1636,108 @@ mod tests {
         }
     }
 
+    #[test]
+    fn editing_action_group_id_moves_it_to_the_destination_group() {
+        let mut config = sample_rich_config(3);
+        assert!(config.actions.iter().all(|a| a.group_id == "group-general"));
+
+        config.actions[1].group_id = "group-clipboard".to_string();
+        let normalized = config.normalized();
+
+        let moved = normalized
+            .actions
+            .iter()
+            .find(|a| a.name == "action-1")
+            .expect("moved action must still exist");
+        assert_eq!(moved.group_id, "group-clipboard");
+
+        // Untouched actions keep their original group assignment.
+        assert_eq!(normalized.actions[0].group_id, "group-general");
+        assert_eq!(normalized.actions[2].group_id, "group-general");
+
+        // The action appears exactly once across the whole action list -
+        // moving groups must never duplicate it.
+        assert_eq!(
+            normalized.actions.iter().filter(|a| a.name == "action-1").count(),
+            1
+        );
+        assert_eq!(normalized.actions.len(), 3, "no action must be dropped or duplicated by a group move");
+    }
+
+    #[test]
+    fn moved_action_preserves_identity_and_all_other_fields() {
+        let mut config = sample_rich_config(3);
+        let original = config.actions[1].clone();
+
+        config.actions[1].group_id = "group-clipboard".to_string();
+        let normalized = config.normalized();
+        let moved = normalized.actions.iter().find(|a| a.name == "action-1").unwrap();
+
+        assert_eq!(moved.name, original.name);
+        assert_eq!(moved.trigger_type, original.trigger_type);
+        assert_eq!(moved.trigger_slot, original.trigger_slot);
+        assert_eq!(moved.gesture, original.gesture);
+        assert_eq!(moved.action_type, original.action_type);
+        assert_eq!(moved.keystroke, original.keystroke);
+        assert_eq!(moved.modifiers, original.modifiers);
+        assert_ne!(moved.group_id, original.group_id, "only group_id should have changed");
+    }
+
+    #[test]
+    fn moving_to_each_existing_group_resolves_to_that_group() {
+        let config = sample_rich_config(1);
+        let groups = config.groups.clone();
+
+        for group in &groups {
+            let mut candidate = config.clone();
+            candidate.actions[0].group_id = group.id.clone();
+            let normalized = candidate.normalized();
+            assert_eq!(normalized.actions[0].group_id, group.id);
+            // Moving must never invent a duplicate of an already-known group.
+            assert_eq!(
+                normalized.groups.iter().filter(|g| g.id == group.id).count(),
+                1
+            );
+        }
+    }
+
+    #[test]
+    fn missing_or_deleted_group_id_falls_back_to_default_group_safely() {
+        let mut config = sample_rich_config(2);
+        config.actions[0].group_id = "group-does-not-exist".to_string();
+
+        let normalized = config.normalized();
+
+        assert_eq!(normalized.actions[0].group_id, DEFAULT_GROUP_ID, "an action referencing a deleted group must fall back to the default group, not be dropped");
+        assert_eq!(normalized.actions.len(), 2, "the action must survive the fallback, not be dropped");
+        assert!(normalized.groups.iter().any(|g| g.id == DEFAULT_GROUP_ID));
+    }
+
+    #[test]
+    fn group_reassignment_survives_save_and_reload() {
+        let temp_dir = unique_temp_dir("group-reassignment-roundtrip");
+        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let mut config = sample_rich_config(5);
+        manager.save_config(&config).expect("initial config should save");
+
+        config.actions[2].group_id = "group-clipboard".to_string();
+        manager.save_config(&config).expect("reassigned config should save");
+
+        let reloaded = manager.load_config().expect("reassigned config should reload");
+        assert_eq!(reloaded.actions.len(), 5, "reload must not drop or duplicate actions");
+        assert_eq!(reloaded.actions[2].group_id, "group-clipboard");
+        assert_eq!(
+            reloaded.actions.iter().filter(|a| a.name == "action-2").count(),
+            1,
+            "the reassigned action must appear exactly once after reload"
+        );
+        for (idx, action) in reloaded.actions.iter().enumerate() {
+            if idx != 2 {
+                assert_eq!(action.group_id, "group-general", "unrelated actions must keep their original group");
+            }
+        }
+    }
+
     fn wheel_action(trigger_slot: &str, wheel_trigger: &str) -> Action {
         Action {
             trigger_type: "wheel".to_string(),

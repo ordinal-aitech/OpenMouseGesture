@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "../common/Button";
 import { GestureCanvas } from "../common/GestureCanvas";
-import type { Action, GestureTemplate, TriggerSlot, WheelTrigger } from "../../types";
+import type { Action, ActionGroup, GestureTemplate, TriggerSlot, WheelTrigger } from "../../types";
 import { getActionKey, normalizeTriggerSlot } from "../../utils/actionKey";
 import "./ActionEditor.css";
 
@@ -9,9 +9,19 @@ interface ActionEditorProps {
   action: Action | null;
   gestures: GestureTemplate[];
   actions: Action[];
-  groupName?: string;
+  groups: ActionGroup[];
   isNew?: boolean;
   onChange: (action: Action) => void;
+}
+
+const DEFAULT_GROUP_ID = "group-uncategorized";
+
+function resolveInitialGroupId(action: Action | null, groups: ActionGroup[]): string {
+  const fallback = groups[0]?.id || DEFAULT_GROUP_ID;
+  if (action?.group_id && groups.some((g) => g.id === action.group_id)) {
+    return action.group_id;
+  }
+  return fallback;
 }
 
 const modifierOptions = ["Ctrl", "Shift", "Alt", "Win"];
@@ -52,8 +62,9 @@ const wheelTriggerOptions: { value: WheelTrigger; label: string }[] = [
   { value: "wheel_down", label: "ホイール下" },
 ];
 
-export function ActionEditor({ action, gestures, actions, groupName, isNew = false, onChange }: ActionEditorProps) {
+export function ActionEditor({ action, gestures, actions, groups, isNew = false, onChange }: ActionEditorProps) {
   const [name, setName] = useState(action?.name || "");
+  const [groupId, setGroupId] = useState<string>(resolveInitialGroupId(action, groups));
   const [triggerType, setTriggerType] = useState<"gesture" | "wheel">(action?.trigger_type || "gesture");
   const [triggerSlot, setTriggerSlot] = useState<TriggerSlot>(normalizeTriggerSlot(action?.trigger_slot));
   const [gesture, setGesture] = useState(action?.gesture || "");
@@ -77,6 +88,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
     if (newActionJson !== actionJsonRef.current) {
       actionJsonRef.current = newActionJson;
       setName(action?.name || "");
+      setGroupId(resolveInitialGroupId(action, groups));
       setTriggerType(action?.trigger_type || "gesture");
       setTriggerSlot(normalizeTriggerSlot(action?.trigger_slot));
       setGesture(action?.gesture || "");
@@ -147,7 +159,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
 
     const nextAction: Action = {
       name: name.trim() || undefined,
-      group_id: action?.group_id,
+      group_id: groupId,
       trigger_type: triggerType,
       trigger_slot: triggerSlot,
       gesture: triggerType === "gesture" ? gesture : "",
@@ -184,7 +196,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
       }, 500);
       return () => clearTimeout(timer);
     }
-  }, [name, triggerType, triggerSlot, gesture, wheelTrigger, actionType, keystroke, modifiers, command, url, operation, text, ignoreExe]);
+  }, [name, groupId, triggerType, triggerSlot, gesture, wheelTrigger, actionType, keystroke, modifiers, command, url, operation, text, ignoreExe]);
 
   return (
     <div className="action-editor">
@@ -203,8 +215,14 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
         </div>
 
         <div className="form-group">
-          <label>グループ</label>
-          <div className="readonly-value">{groupName || "未分類"}</div>
+          <label htmlFor="action-group">グループ</label>
+          <select id="action-group" value={groupId} onChange={(e) => setGroupId(e.target.value)}>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="section-divider" />

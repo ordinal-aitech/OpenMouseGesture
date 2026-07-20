@@ -60,7 +60,6 @@ export function ActionsTab() {
   const groups = useMemo(() => ensureGroups(config), [config]);
   const selectedActionData = actions.find((a) => getActionKey(a) === selectedAction);
   const selectedGroupId = (isNew ? draftGroupId : selectedActionData?.group_id) || groups[0]?.id || DEFAULT_GROUP_ID;
-  const selectedGroupName = groups.find((group) => group.id === selectedGroupId)?.name || DEFAULT_GROUP_NAME;
 
   const editorAction = isNew
     ? ({
@@ -221,7 +220,7 @@ export function ActionsTab() {
               action={editorAction}
               gestures={gestures}
               actions={actions}
-              groupName={selectedGroupName}
+              groups={groups}
               isNew={isNew}
               onChange={handleChange}
             />
