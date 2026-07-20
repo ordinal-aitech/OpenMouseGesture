@@ -375,7 +375,7 @@ fn get_config() -> Result<Config, String> {
 #[tauri::command]
 fn save_config(config: Config) -> Result<(), String> {
     let manager = ConfigManager::new()?;
-    mouse_hook::cancel_keyboard_gesture_session();
+    mouse_hook::cancel_active_gesture_session();
     set_trajectory_enabled_internal(config.trajectory);
     manager.save_config(&config)
 }
@@ -457,7 +457,7 @@ fn set_gesture_enabled(enabled: bool) {
     let mut gesture_enabled = GESTURE_ENABLED.lock().unwrap();
     *gesture_enabled = enabled;
     if !enabled {
-        mouse_hook::cancel_keyboard_gesture_session();
+        mouse_hook::cancel_active_gesture_session();
     }
 }
 
@@ -604,7 +604,7 @@ fn toggle_gesture_enabled(_app: &AppHandle) {
             result.is_ok()
         );
     } else {
-        mouse_hook::cancel_keyboard_gesture_session();
+        mouse_hook::cancel_active_gesture_session();
         let result = mouse_hook::uninstall_hook();
         eprintln!(
             "[tray] gesture toggle -> disabled, hook uninstall result: {:?}",

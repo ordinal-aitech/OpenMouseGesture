@@ -225,8 +225,13 @@ pub fn display_key_for_code(code: &str) -> Option<String> {
         "ArrowLeft" => Some("Left".to_string()),
         "ArrowRight" => Some("Right".to_string()),
         "ArrowUp" => Some("Up".to_string()),
+        "Backquote" => Some("`".to_string()),
+        "Backslash" => Some("\\".to_string()),
         "Backspace" => Some("Backspace".to_string()),
+        "BracketLeft" => Some("[".to_string()),
+        "BracketRight" => Some("]".to_string()),
         "CapsLock" => Some("CapsLock".to_string()),
+        "Comma" => Some(",".to_string()),
         "Delete" => Some("Delete".to_string()),
         "End" => Some("End".to_string()),
         "Enter" => Some("Enter".to_string()),
@@ -235,6 +240,7 @@ pub fn display_key_for_code(code: &str) -> Option<String> {
         "Home" => Some("Home".to_string()),
         "Insert" => Some("Insert".to_string()),
         "Minus" => Some("-".to_string()),
+        "Quote" => Some("'".to_string()),
         "NumpadAdd" => Some("Num +".to_string()),
         "NumpadDecimal" => Some("Num .".to_string()),
         "NumpadDivide" => Some("Num /".to_string()),
@@ -310,6 +316,12 @@ pub fn keyboard_code_to_vk(code: &str) -> Option<u16> {
         "Semicolon" => Some(0xBA),
         "Slash" => Some(0xBF),
         "Period" => Some(0xBE),
+        "Comma" => Some(0xBC),
+        "Quote" => Some(0xDE),
+        "Backquote" => Some(0xC0),
+        "Backslash" => Some(0xDC),
+        "BracketLeft" => Some(0xDB),
+        "BracketRight" => Some(0xDD),
         "NumpadMultiply" => Some(0x6A),
         "NumpadAdd" => Some(0x6B),
         "NumpadSubtract" => Some(0x6D),
@@ -1493,6 +1505,47 @@ mod tests {
         assert_eq!(keyboard_code_to_vk("KeyK"), Some(b'K' as u16));
         assert_eq!(keyboard_code_to_vk("Digit5"), Some(b'5' as u16));
         assert_eq!(keyboard_code_to_vk("NotAKey"), None);
+    }
+
+    #[test]
+    fn keyboard_code_to_vk_covers_caps_lock() {
+        // CapsLock (VK_CAPITAL = 0x14) is delivered consistently through
+        // WH_KEYBOARD_LL as an ordinary down/up virtual key, so it must resolve
+        // the same way any other dedicated single-key trigger does.
+        assert_eq!(keyboard_code_to_vk("CapsLock"), Some(0x14));
+    }
+
+    #[test]
+    fn keyboard_code_to_vk_covers_oem_punctuation_keys_the_ui_can_capture() {
+        // Regression: the settings UI previously accepted these codes (they
+        // are in SettingsTab's display-label map) even though the backend had
+        // no VK mapping for them, so a capture that "looked" valid could never
+        // match at runtime. Every code the UI can label must resolve here too.
+        assert_eq!(keyboard_code_to_vk("Backquote"), Some(0xC0));
+        assert_eq!(keyboard_code_to_vk("Backslash"), Some(0xDC));
+        assert_eq!(keyboard_code_to_vk("BracketLeft"), Some(0xDB));
+        assert_eq!(keyboard_code_to_vk("BracketRight"), Some(0xDD));
+        assert_eq!(keyboard_code_to_vk("Comma"), Some(0xBC));
+        assert_eq!(keyboard_code_to_vk("Quote"), Some(0xDE));
+    }
+
+    #[test]
+    fn keyboard_code_to_vk_rejects_japanese_ime_only_codes() {
+        // These `KeyboardEvent.code` values exist on Japanese keyboards/IMEs
+        // but are not exposed as ordinary, reliably observable virtual keys
+        // through the current low-level hook; they must stay unsupported
+        // rather than silently accepted as a code the hook can never match.
+        for code in ["KanaMode", "Convert", "NonConvert", "Lang1", "Lang2", "Lang3", "Lang4", "Lang5"] {
+            assert_eq!(keyboard_code_to_vk(code), None, "{code} should be unsupported");
+        }
+    }
+
+    #[test]
+    fn parse_keyboard_trigger_round_trips_caps_lock_as_a_dedicated_single_key() {
+        let (modifiers, code) =
+            parse_keyboard_trigger("key:CapsLock").expect("CapsLock should parse");
+        assert!(modifiers.is_empty());
+        assert_eq!(code, "CapsLock");
     }
 
     fn sample_rich_config(action_count: usize) -> Config {

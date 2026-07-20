@@ -63,6 +63,46 @@ const keyLabelsByCode: Record<string, string> = {
   Tab: "Tab",
 };
 
+// `KeyboardEvent.code` values that exist on real keyboards (notably Japanese
+// IME/kana-mode keys) but are not exposed as ordinary, reliably observable
+// virtual keys through the app's low-level Windows keyboard hook. These must
+// be rejected at capture time with a clear message rather than silently
+// stored as a trigger that can never match at runtime. This list intentionally
+// only contains codes we have concrete reason to distrust; anything else that
+// falls outside the supported-code allowlist is just ignored (treated as
+// "not a key yet", e.g. a bare modifier press), matching prior behavior.
+const KNOWN_UNSUPPORTED_KEY_CODES = new Set([
+  "KanaMode",
+  "Convert",
+  "NonConvert",
+  "Lang1",
+  "Lang2",
+  "Lang3",
+  "Lang4",
+  "Lang5",
+  "IntlRo",
+  "IntlYen",
+  "Hiragana",
+  "Katakana",
+  "HiraganaKatakana",
+]);
+
+function isSupportedKeyCode(code: string): boolean {
+  if (code.startsWith("Key") && code.length === 4 && /^[A-Z]$/.test(code.slice(3))) {
+    return true;
+  }
+  if (code.startsWith("Digit") && code.length === 6 && /^[0-9]$/.test(code.slice(5))) {
+    return true;
+  }
+  if (/^F([1-9]|1[0-9]|2[0-4])$/.test(code)) {
+    return true;
+  }
+  if (/^Numpad[0-9]$/.test(code)) {
+    return true;
+  }
+  return Object.prototype.hasOwnProperty.call(keyLabelsByCode, code);
+}
+
 function normalizeMouseTrigger(trigger: string): MouseTriggerButton | null {
   const normalized = trigger.trim().toLowerCase();
   if (LEGACY_MOUSE_TRIGGERS.has(normalized)) {
@@ -86,7 +126,18 @@ function serializeKeyboardTrigger(modifiers: string[], code: string) {
   return `key:${parts.join("+")}`;
 }
 
-function getKeyboardKeyLabel(code: string, key: string) {
+// `key` is accepted for signature compatibility with call sites that pass an
+// event's `.key` for legacy/display purposes, but display and validity are
+// both driven entirely by `code` (the canonical, layout-independent identity
+// also used to build/match the stored trigger string). This guarantees the
+// settings UI can never show or accept a code the runtime hook cannot match:
+// see `isSupportedKeyCode`, which mirrors `keyboard_code_to_vk` in the Rust
+// backend exactly.
+function getKeyboardKeyLabel(code: string, _key: string) {
+  if (!isSupportedKeyCode(code)) {
+    return null;
+  }
+
   if (code.startsWith("Key") && code.length === 4) {
     return code.slice(3);
   }
@@ -103,16 +154,7 @@ function getKeyboardKeyLabel(code: string, key: string) {
     return "Num " + code.slice(6);
   }
 
-  if (keyLabelsByCode[code]) {
-    return keyLabelsByCode[code];
-  }
-
-  const fallback = key.trim();
-  if (!fallback || fallback === "Shift" || fallback === "Control" || fallback === "Alt" || fallback === "Meta") {
-    return null;
-  }
-
-  return fallback.length === 1 ? fallback.toUpperCase() : fallback;
+  return keyLabelsByCode[code] ?? null;
 }
 
 function formatTrigger(trigger: GestureTrigger) {
@@ -322,11 +364,19 @@ export function SettingsTab() {
   const applyCapturedTrigger = useCallback(
     (slot: TriggerSlot, trigger: GestureTrigger) => {
       const otherTriggers = slot === "A" ? [triggerB, triggerC] : slot === "B" ? [triggerA, triggerC] : [triggerA, triggerB];
+      // Rejecting a duplicate must still leave capture mode cleanly, exactly
+      // like a successful capture or an explicit cancellation does. Leaving
+      // captureSlot set here previously left the "入力待機中..." state (and its
+      // window-level key/mouse listeners) stuck active: a later, unrelated
+      // capture attempt on the same slot could then look "stuck" until the
+      // user pressed some other key first, which is what made a duplicate
+      // dedicated key (e.g. reassigning CapsLock while another slot still
+      // held it) look intermittently registerable.
+      setCaptureSlot(null);
       if (trigger.startsWith("key:") && !trigger.includes("+") && otherTriggers.includes(trigger)) {
         setError("That dedicated keyboard key is already assigned to another trigger.");
         return;
       }
-      setCaptureSlot(null);
       switch (slot) {
         case "A":
           setTriggerA(trigger);
@@ -385,6 +435,14 @@ export function SettingsTab() {
         event.preventDefault();
         setCaptureSlot(null);
         setError(null);
+        return;
+      }
+
+      if (KNOWN_UNSUPPORTED_KEY_CODES.has(event.code)) {
+        event.preventDefault();
+        event.stopPropagation();
+        setError("このキーは登録できません。OSから安定して検出できない特殊キー（IME/かな関連キーなど）のため、トリガーとして使用できません。");
+        setCaptureSlot(null);
         return;
       }
 

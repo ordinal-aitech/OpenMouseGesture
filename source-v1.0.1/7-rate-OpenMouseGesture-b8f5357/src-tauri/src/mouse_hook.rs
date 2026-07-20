@@ -4,7 +4,11 @@ use std::time::{Duration, Instant};
 
 use windows::{
     core::*, Win32::Foundation::*, Win32::System::Threading::*,
-    Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState, Win32::UI::WindowsAndMessaging::*,
+    Win32::UI::Input::KeyboardAndMouse::{
+        GetAsyncKeyState, GetKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
+        KEYEVENTF_KEYUP, VIRTUAL_KEY,
+    },
+    Win32::UI::WindowsAndMessaging::*,
 };
 
 const LLMHF_INJECTED: u32 = 0x00000001;
@@ -106,6 +110,12 @@ static LAST_PREVIEW_KEY: Mutex<Option<String>> = Mutex::new(None);
 static PRESSED_KEYS: LazyLock<Mutex<HashSet<u16>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
 static KEYBOARD_RELEASE_STATE: Mutex<KeyboardReleaseState> =
     Mutex::new(KeyboardReleaseState::new());
+/// Escape による緊急キャンセル中、対応する keyup（および途中の auto-repeat
+/// keydown）を確実に同じインタラクションとして飲み込むためのフラグ。
+static ESCAPE_CANCEL_CONSUMING: Mutex<bool> = Mutex::new(false);
+
+const VK_CAPITAL: u16 = 0x14;
+const VK_ESCAPE: u16 = 0x1B;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct KeyboardReleaseState {
@@ -677,26 +687,86 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
     KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
 }
 
-/// 設定変更・無効化・フック再初期化では、保留中を含むキーボードセッションを実行せず破棄する。
-pub fn cancel_keyboard_gesture_session() {
+/// すべての強制終了経路（無効化・設定変更・フック再インストール・アクション
+/// 送出失敗・内部エラー・Escapeによる緊急キャンセル）が共有する、単一の
+/// 冪等なセッション破棄処理。マウス起点・キーボード起点いずれのセッションも
+/// 区別せず終了させる。アクションは絶対に送出しない。繰り返し呼んでも安全。
+pub fn cancel_active_gesture_session() {
     KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
-    let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
-    let config = ACTIVE_CONFIG.lock().unwrap().clone();
-    let is_keyboard_session =
-        active_slot
-            .as_deref()
-            .zip(config.as_ref())
-            .is_some_and(|(slot, config)| {
-                crate::config::parse_keyboard_trigger(crate::trigger_button_for_slot(config, slot))
-                    .is_some()
-            });
-    if is_keyboard_session {
-        *IS_DRAGGING.lock().unwrap() = false;
-        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
-        *GESTURE_START_WINDOW.lock().unwrap() = None;
-        TRAJECTORY.lock().unwrap().clear();
-        clear_preview_state();
-        crate::emit_trajectory_update(&[], false);
+    *IS_DRAGGING.lock().unwrap() = false;
+    *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+    *GESTURE_START_WINDOW.lock().unwrap() = None;
+    TRAJECTORY.lock().unwrap().clear();
+    clear_preview_state();
+    crate::emit_trajectory_update(&[], false);
+    diag_log("gesture session cancelled via centralized teardown");
+}
+
+fn session_is_active_or_release_pending() -> bool {
+    // release-pending の間も complete_gesture が呼ばれるまで IS_DRAGGING は
+    // true のままなので、この一つのフラグでアクティブ/保留中の両方を表せる。
+    *IS_DRAGGING.lock().unwrap()
+}
+
+/// CapsLock のトグル状態（GetKeyState 下位ビット）を返す。
+fn capslock_toggle_on() -> bool {
+    unsafe { (GetKeyState(VK_CAPITAL as i32) as u16 & 0x0001) != 0 }
+}
+
+/// 抑止前後でトグル状態が変化したかどうかだけを判定する純粋関数。
+/// 変化していなければ何もしない（余計な合成入力を send しない）。
+fn capslock_needs_toggle_correction(before: bool, after: bool) -> bool {
+    before != after
+}
+
+/// `before` は、CapsLock keydown を OpenMouseGesture が抑止する直前に読んだ
+/// トグル状態。低レベルフックで keydown/keyup を握りつぶしても、Windows の
+/// バージョンや構成によってはトグル状態（インジケーター/LED）がフック鎖の
+/// 外側で更新されてしまうことがある。短い遅延の後に再度状態を読み、抑止前
+/// から変化していた場合のみ、合成の CapsLock 押下で元の状態へ戻す
+/// （合成イベントは LLKHF_INJECTED が立つため、このフック自身の判定には
+/// 再入しない）。
+fn correct_capslock_toggle_if_needed(before: bool) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(2));
+        let after = capslock_toggle_on();
+        if capslock_needs_toggle_correction(before, after) {
+            diag_log(format!(
+                "capslock toggle drifted despite suppression (before={} after={}), correcting",
+                before, after
+            ));
+            synthesize_capslock_press();
+        }
+    });
+}
+
+fn synthesize_capslock_press() {
+    unsafe {
+        let down = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(VK_CAPITAL),
+                    wScan: 0,
+                    dwFlags: Default::default(),
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let up = INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 {
+                ki: KEYBDINPUT {
+                    wVk: VIRTUAL_KEY(VK_CAPITAL),
+                    wScan: 0,
+                    dwFlags: KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                },
+            },
+        };
+        let _ = SendInput(&[down, up], std::mem::size_of::<INPUT>() as i32);
     }
 }
 
@@ -882,6 +952,36 @@ unsafe extern "system" fn keyboard_hook_proc(
     let event_type = w_param.0 as u32;
     let vk_code = keyboard_data.vkCode as u16;
 
+    if vk_code == VK_ESCAPE {
+        match event_type {
+            WM_KEYDOWN | WM_SYSKEYDOWN => {
+                if *ESCAPE_CANCEL_CONSUMING.lock().unwrap() {
+                    // Auto-repeat while we are already mid-cancellation: keep
+                    // swallowing it so the foreground app never sees any part
+                    // of this Escape press/hold/release.
+                    return LRESULT(1);
+                }
+                if session_is_active_or_release_pending() {
+                    diag_log("Escape pressed: cancelling active/pending gesture session");
+                    cancel_active_gesture_session();
+                    *ESCAPE_CANCEL_CONSUMING.lock().unwrap() = true;
+                    return LRESULT(1);
+                }
+                // No active/pending session: fall through to normal handling
+                // (including ordinary trigger matching) so Escape behaves
+                // exactly as it would without OpenMouseGesture running.
+            }
+            WM_KEYUP | WM_SYSKEYUP => {
+                let mut consuming = ESCAPE_CANCEL_CONSUMING.lock().unwrap();
+                if *consuming {
+                    *consuming = false;
+                    return LRESULT(1);
+                }
+            }
+            _ => {}
+        }
+    }
+
     match event_type {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let pressed_snapshot = {
@@ -947,6 +1047,14 @@ unsafe extern "system" fn keyboard_hook_proc(
                 // A configured single key is an OpenMouseGesture-dedicated key:
                 // consume initial and auto-repeat down events before Windows sees them.
                 if dedicated_slot.is_some() {
+                    if vk_code == VK_CAPITAL {
+                        // Suppression here should already prevent the toggle
+                        // (indicator/LED) from flipping, but on some Windows
+                        // configurations the toggle state updates outside the
+                        // hook chain regardless. Detect and correct that drift
+                        // instead of assuming suppression alone is enough.
+                        correct_capslock_toggle_if_needed(capslock_toggle_on());
+                    }
                     return LRESULT(1);
                 }
             }
@@ -1046,15 +1154,13 @@ pub fn uninstall_hook() -> Result<()> {
 
     // フック解除時に、押しっぱなし・ジェスチャー進行中の状態を必ず消す。
     // これがないと、ジェスチャー中に無効化/終了した場合に次回フック導入時
-    // 古い状態（掴みっぱなしのボタン等）が残ってしまう。
+    // 古い状態（掴みっぱなしのボタン等）が残ってしまう。セッション状態の
+    // 破棄自体は一本化された `cancel_active_gesture_session` に委譲し、
+    // ここでは物理キーの押下トラッキングと Escape 飲み込み中フラグも
+    // あわせてリセットする。
+    cancel_active_gesture_session();
     PRESSED_KEYS.lock().unwrap().clear();
-    KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
-    *IS_DRAGGING.lock().unwrap() = false;
-    *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
-    *GESTURE_START_WINDOW.lock().unwrap() = None;
-    TRAJECTORY.lock().unwrap().clear();
-    clear_preview_state();
-    crate::emit_trajectory_update(&[], false);
+    *ESCAPE_CANCEL_CONSUMING.lock().unwrap() = false;
     diag_log("hook uninstalled: held-button/gesture state cleared");
     Ok(())
 }
@@ -1609,5 +1715,130 @@ mod tests {
         // Cannot simulate a physically-held key in CI, but a mouse-trigger slot
         // must resolve to no modifiers regardless of live keyboard state.
         assert!(active_trigger_modifier_vks(&config, "A").is_empty());
+    }
+
+    // --- Centralized idempotent teardown (cancel_active_gesture_session) ---
+
+    #[test]
+    fn cancel_active_gesture_session_clears_all_session_state_and_never_dispatches() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("key:Shift+F1", "mouse:middle", "mouse:x1");
+
+        begin_gesture(&config, "A", POINT { x: 5, y: 5 }, HWND::default());
+        TRAJECTORY.lock().unwrap().push((6, 6));
+        KEYBOARD_RELEASE_STATE.lock().unwrap().begin(0x70);
+
+        cancel_active_gesture_session();
+
+        assert!(!*IS_DRAGGING.lock().unwrap());
+        assert!(ACTIVE_TRIGGER_SLOT.lock().unwrap().is_none());
+        assert!(GESTURE_START_WINDOW.lock().unwrap().is_none());
+        assert!(TRAJECTORY.lock().unwrap().is_empty());
+        // A cleared release state can no longer resume/confirm a stale key.
+        assert!(!KEYBOARD_RELEASE_STATE.lock().unwrap().resume(0x70));
+    }
+
+    #[test]
+    fn cancel_active_gesture_session_is_safe_to_call_repeatedly() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+        begin_gesture(&config, "A", POINT { x: 1, y: 1 }, HWND::default());
+
+        cancel_active_gesture_session();
+        cancel_active_gesture_session();
+        cancel_active_gesture_session();
+
+        assert!(!*IS_DRAGGING.lock().unwrap());
+        assert!(TRAJECTORY.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn cancel_active_gesture_session_makes_pending_delayed_release_harmless() {
+        // Regression for the "gesture session never terminated" report: a
+        // delayed confirmed-release callback captured from before cancellation
+        // must not be able to resurrect or complete the cancelled session.
+        // `take_confirmed_release` is the exact gate `schedule_confirmed_keyboard_release`
+        // checks before calling `complete_gesture`; if cancellation bumped the
+        // generation, a stale (key, old_generation) pair must always fail it.
+        let mut state = KeyboardReleaseState::new();
+        state.begin(0x5A);
+        let generation = state
+            .enter_release_pending(0x5A)
+            .expect("keyup enters release-pending");
+
+        // Cancellation runs concurrently/before the delayed callback fires.
+        state.clear();
+
+        assert!(!state.take_confirmed_release(0x5A, generation));
+    }
+
+    // --- Escape emergency cancel ---
+
+    #[test]
+    fn session_is_active_or_release_pending_reflects_is_dragging() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        *IS_DRAGGING.lock().unwrap() = false;
+        assert!(!session_is_active_or_release_pending());
+
+        *IS_DRAGGING.lock().unwrap() = true;
+        assert!(session_is_active_or_release_pending());
+
+        *IS_DRAGGING.lock().unwrap() = false;
+    }
+
+    #[test]
+    fn escape_cancel_consuming_flag_starts_false() {
+        // Baseline for the escape-consume interlock: idle state must never
+        // start in a "mid-cancellation" state that would eat an unrelated
+        // Escape keyup.
+        assert!(!*ESCAPE_CANCEL_CONSUMING.lock().unwrap());
+    }
+
+    // --- CapsLock toggle-state drift correction ---
+
+    #[test]
+    fn capslock_needs_toggle_correction_only_when_state_changed() {
+        assert!(!capslock_needs_toggle_correction(true, true));
+        assert!(!capslock_needs_toggle_correction(false, false));
+        assert!(capslock_needs_toggle_correction(true, false));
+        assert!(capslock_needs_toggle_correction(false, true));
+    }
+
+    // --- Dedicated single-key trigger reassignment (CapsLock <-> other key) ---
+
+    #[test]
+    fn dedicated_keyboard_slot_for_vk_tracks_repeated_capslock_reassignment() {
+        // Regression for "CapsLock registerable once, fails after switching to
+        // another key, works again after further edits": the slot resolution
+        // is a pure function of the *current* config, so repeatedly assigning
+        // CapsLock -> another key -> CapsLock again on the same slot must
+        // resolve identically every time with no leftover state from earlier
+        // configs.
+        let capslock_config = config_with_triggers("key:CapsLock", "mouse:middle", "mouse:x1");
+        assert_eq!(
+            dedicated_keyboard_slot_for_vk(&capslock_config, VK_CAPITAL),
+            Some("A")
+        );
+
+        let f5_config = config_with_triggers("key:F5", "mouse:middle", "mouse:x1");
+        assert_eq!(dedicated_keyboard_slot_for_vk(&f5_config, VK_CAPITAL), None);
+        assert_eq!(dedicated_keyboard_slot_for_vk(&f5_config, 0x74), Some("A"));
+
+        // Re-assigning CapsLock again must resolve exactly as it did the first time.
+        assert_eq!(
+            dedicated_keyboard_slot_for_vk(&capslock_config, VK_CAPITAL),
+            Some("A")
+        );
+    }
+
+    #[test]
+    fn keyboard_code_to_vk_backed_dedicated_trigger_round_trips_capslock() {
+        let config = config_with_triggers("key:CapsLock", "mouse:middle", "mouse:x1");
+        assert!(trigger_slot_for_keyboard_down(
+            &config,
+            VK_CAPITAL,
+            &HashSet::from([VK_CAPITAL])
+        )
+        .is_some());
     }
 }
