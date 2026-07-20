@@ -35,6 +35,14 @@ const keyLabelsByCode: Record<string, string> = {
   BracketLeft: "[",
   BracketRight: "]",
   CapsLock: "CapsLock",
+  // `KeyboardEvent.code` is always location-specific for Shift/Alt (the Web
+  // spec never delivers a bare "Shift"/"Alt"), so only the Left/Right codes
+  // are supported; this mirrors `keyboard_code_to_vk` in the Rust backend
+  // exactly, each resolving to one canonical, deterministic VK.
+  ShiftLeft: "Shift (Left)",
+  ShiftRight: "Shift (Right)",
+  AltLeft: "Alt (Left)",
+  AltRight: "Alt (Right)",
   Comma: ",",
   Delete: "Delete",
   End: "End",
@@ -402,6 +410,17 @@ export function SettingsTab() {
 
     captureReadyAtRef.current = Date.now() + CAPTURE_ARM_DELAY_MS;
 
+    // While capturing, the low-level keyboard hook must not consume or act
+    // on any key (including one already dedicated to another trigger slot),
+    // so this window can actually observe the raw keydown. Every exit path
+    // from capture mode (successful capture, duplicate rejection,
+    // unsupported-key rejection, Escape cancellation, or switching to a
+    // different slot) changes `captureSlot`, which re-runs this effect and
+    // its cleanup below — so capture mode is always turned back off exactly
+    // once, on every branch, without needing to repeat the call at each
+    // call site.
+    void api.setHookCaptureMode(true);
+
     const handleMouseCapture = (event: MouseEvent) => {
       if (Date.now() < captureReadyAtRef.current) {
         return;
@@ -468,6 +487,7 @@ export function SettingsTab() {
       window.removeEventListener("mousedown", handleMouseCapture, true);
       window.removeEventListener("keydown", handleKeyboardCapture, true);
       window.removeEventListener("contextmenu", suppressContextMenu, true);
+      void api.setHookCaptureMode(false);
     };
   }, [applyCapturedTrigger, captureSlot]);
 

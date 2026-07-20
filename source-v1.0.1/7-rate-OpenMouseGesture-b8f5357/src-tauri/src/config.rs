@@ -231,6 +231,10 @@ pub fn display_key_for_code(code: &str) -> Option<String> {
         "BracketLeft" => Some("[".to_string()),
         "BracketRight" => Some("]".to_string()),
         "CapsLock" => Some("CapsLock".to_string()),
+        "ShiftLeft" => Some("Shift (Left)".to_string()),
+        "ShiftRight" => Some("Shift (Right)".to_string()),
+        "AltLeft" => Some("Alt (Left)".to_string()),
+        "AltRight" => Some("Alt (Right)".to_string()),
         "Comma" => Some(",".to_string()),
         "Delete" => Some("Delete".to_string()),
         "End" => Some("End".to_string()),
@@ -301,6 +305,16 @@ pub fn keyboard_code_to_vk(code: &str) -> Option<u16> {
         "Enter" | "NumpadEnter" => Some(0x0D),
         "Pause" => Some(0x13),
         "CapsLock" => Some(0x14),
+        // Shift is reported by WH_KEYBOARD_LL as the location-specific VK
+        // directly (VK_LSHIFT/VK_RSHIFT), never the generic VK_SHIFT (0x10).
+        // Ctrl/Alt are reported as the generic VK and disambiguated via the
+        // hook's extended-key flag (see `mouse_hook::normalize_generic_modifier_vk`),
+        // but are re-expressed here as their canonical location-specific VK so a
+        // dedicated Shift/Alt trigger has one deterministic identity end-to-end.
+        "ShiftLeft" => Some(0xA0),
+        "ShiftRight" => Some(0xA1),
+        "AltLeft" => Some(0xA4),
+        "AltRight" => Some(0xA5),
         "Escape" => Some(0x1B),
         "Space" => Some(0x20),
         "PageUp" => Some(0x21),
@@ -361,6 +375,16 @@ pub fn normalize_trigger_binding(value: &str, default_value: &str) -> String {
 
     if let Some((modifiers, code)) = parse_keyboard_trigger(value) {
         return format_keyboard_trigger(&modifiers, &code);
+    }
+
+    // Defensive migration: a bare code with no "key:" prefix and no
+    // modifiers (e.g. a value written by an older build that predates the
+    // "key:" prefix convention) is reinterpreted as a dedicated single-key
+    // trigger rather than being silently discarded and replaced by the
+    // slot's mouse default. Only a code the runtime hook can actually match
+    // is accepted here; anything else still falls through to the default.
+    if keyboard_code_to_vk(value.trim()).is_some() {
+        return format_keyboard_trigger(&[], value.trim());
     }
 
     if let Some(button) = normalize_mouse_trigger(default_value) {
@@ -650,18 +674,24 @@ impl Config {
             )));
         }
 
-        let mut dedicated_keys = HashSet::new();
+        // Canonical physical identity: two dedicated-key triggers conflict
+        // when they resolve to the same code string (the same value
+        // `keyboard_code_to_vk` and the runtime hook match on), regardless
+        // of incidental string formatting differences elsewhere.
+        let mut dedicated_keys: HashMap<String, &str> = HashMap::new();
         for (slot, trigger) in [
             ("A", &self.triggerA),
             ("B", &self.triggerB),
             ("C", &self.triggerC),
         ] {
             if let Some((modifiers, code)) = parse_keyboard_trigger(trigger) {
-                if modifiers.is_empty() && !dedicated_keys.insert(code.clone()) {
-                    return Err(ValidationError::InvalidValue(format!(
-                        "duplicate dedicated keyboard trigger in slot {}: {}",
-                        slot, code
-                    )));
+                if modifiers.is_empty() {
+                    if let Some(owner_slot) = dedicated_keys.insert(code.clone(), slot) {
+                        return Err(ValidationError::InvalidValue(format!(
+                            "duplicate dedicated keyboard trigger: slot {} already uses {}, slot {} cannot reuse it",
+                            owner_slot, code, slot
+                        )));
+                    }
                 }
             }
         }
@@ -1513,6 +1543,51 @@ mod tests {
         // WH_KEYBOARD_LL as an ordinary down/up virtual key, so it must resolve
         // the same way any other dedicated single-key trigger does.
         assert_eq!(keyboard_code_to_vk("CapsLock"), Some(0x14));
+    }
+
+    #[test]
+    fn keyboard_code_to_vk_covers_standalone_shift_and_alt() {
+        // Shift/Alt must be capturable and usable as standalone dedicated
+        // triggers. `KeyboardEvent.code` is always location-specific per the
+        // Web spec (never a bare "Shift"/"Alt"), so only the Left/Right
+        // variants are supported; each resolves to its own canonical VK.
+        assert_eq!(keyboard_code_to_vk("ShiftLeft"), Some(0xA0));
+        assert_eq!(keyboard_code_to_vk("ShiftRight"), Some(0xA1));
+        assert_eq!(keyboard_code_to_vk("AltLeft"), Some(0xA4));
+        assert_eq!(keyboard_code_to_vk("AltRight"), Some(0xA5));
+    }
+
+    #[test]
+    fn parse_keyboard_trigger_round_trips_shift_and_alt_as_dedicated_single_keys() {
+        for code in ["ShiftLeft", "ShiftRight", "AltLeft", "AltRight"] {
+            let trigger = format!("key:{}", code);
+            let (modifiers, parsed_code) =
+                parse_keyboard_trigger(&trigger).unwrap_or_else(|| panic!("{code} should parse"));
+            assert!(modifiers.is_empty());
+            assert_eq!(parsed_code, code);
+            assert_eq!(normalize_trigger_binding(&trigger, "mouse:right"), trigger);
+        }
+    }
+
+    #[test]
+    fn bare_legacy_dedicated_key_code_migrates_to_prefixed_form_instead_of_being_discarded() {
+        // A value written without the "key:" prefix (e.g. by an older build)
+        // must not be silently replaced by the slot's mouse default; it is a
+        // real user-configured dedicated key and must survive normalization.
+        assert_eq!(
+            normalize_trigger_binding("CapsLock", "mouse:right"),
+            "key:CapsLock"
+        );
+        assert_eq!(
+            normalize_trigger_binding(" CapsLock ", "mouse:right"),
+            "key:CapsLock"
+        );
+        // A value that is neither a known mouse trigger nor a known keyboard
+        // code still falls back to the default (no false-positive migration).
+        assert_eq!(
+            normalize_trigger_binding("NotARealKey", "mouse:right"),
+            "mouse:right"
+        );
     }
 
     #[test]

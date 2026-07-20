@@ -53,6 +53,10 @@ export async function isGestureEnabled(): Promise<boolean> {
   return invoke<boolean>("is_gesture_enabled");
 }
 
+export async function setHookCaptureMode(active: boolean): Promise<void> {
+  return invoke("set_hook_capture_mode", { active });
+}
+
 export async function getAutostartStatus(): Promise<boolean> {
   return invoke<boolean>("get_autostart_status");
 }

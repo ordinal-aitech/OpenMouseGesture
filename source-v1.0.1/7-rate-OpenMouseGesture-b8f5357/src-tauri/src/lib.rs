@@ -30,7 +30,6 @@ static APP_HANDLE: OnceCell<AppHandle> = OnceCell::new();
 static GESTURE_ENABLED: Mutex<bool> = Mutex::new(true);
 static TRAJECTORY_ENABLED: Mutex<bool> = Mutex::new(true);
 static TRAY_ICON: OnceCell<Mutex<Option<TrayIcon>>> = OnceCell::new();
-static TOGGLE_MENU_ITEM: OnceCell<MenuItem<tauri::Wry>> = OnceCell::new();
 const ACTION_LABEL_OVERLAY_ENABLED: bool = false;
 
 #[derive(Clone, Serialize)]
@@ -134,6 +133,14 @@ fn load_icon_from_bytes(bytes: &[u8]) -> Option<Image<'static>> {
     Some(Image::new_owned(rgba_data, width, height))
 }
 
+fn tray_tooltip_for_state(enabled: bool) -> &'static str {
+    if enabled {
+        "GestureHotkeyApp (有効)"
+    } else {
+        "GestureHotkeyApp (無効)"
+    }
+}
+
 fn update_tray_icon(enabled: bool) {
     if let Some(tray_mutex) = TRAY_ICON.get() {
         if let Ok(mut tray_opt) = tray_mutex.lock() {
@@ -143,6 +150,7 @@ fn update_tray_icon(enabled: bool) {
                 if let Some(icon) = load_icon_from_bytes(icon_bytes) {
                     let _ = tray.set_icon(Some(icon));
                 }
+                let _ = tray.set_tooltip(Some(tray_tooltip_for_state(enabled)));
             }
         }
     }
@@ -466,6 +474,16 @@ fn is_gesture_enabled() -> bool {
     *GESTURE_ENABLED.lock().unwrap()
 }
 
+/// 設定画面のキャプチャUIが armed の間、フックが一切のキーを消費・トリガー
+/// 開始しないようにする。呼び出しは `SettingsTab` のキャプチャ用 `useEffect`
+/// が開始時・終了時（成功・重複拒否・非対応キー拒否・Escapeキャンセル・
+/// スロット変更・アンマウントいずれも同じクリーンアップ経路を通る）で
+/// 必ず対で行う。
+#[tauri::command]
+fn set_hook_capture_mode(active: bool) {
+    mouse_hook::set_capture_mode_active(active);
+}
+
 #[tauri::command]
 fn get_config_file_path() -> Result<String, String> {
     let manager = ConfigManager::new()?;
@@ -581,21 +599,23 @@ fn get_gestures_validation_error() -> Result<Option<String>, String> {
     }
 }
 
-fn toggle_menu_label(enabled: bool) -> &'static str {
-    if enabled {
-        "ジェスチャーを無効化"
-    } else {
-        "ジェスチャーを有効化"
-    }
-}
-
-/// トレイメニューの明示的な項目からのみ呼び出す。単純な左クリックでは
-/// 呼ばれない（誤操作でフック全体が無音停止する不具合を防ぐため）。
-fn toggle_gesture_enabled(_app: &AppHandle) {
+/// トレイ左クリック1回でジェスチャー有効/無効を切り替える唯一の経路。
+/// 有効化はフックの再インストール、無効化はアクティブ/保留中セッションの
+/// 送出なしキャンセル（`cancel_active_gesture_session`）に続けてフックの
+/// 解除まで行う、アプリ内の他の無効化経路（設定画面の `set_gesture_enabled`
+/// コマンド、キーボード側の内部フラグ）と同じ「安全な」無効化性質を持つ。
+/// 繰り返し呼ぶたびに 有効→無効→有効 と決定的に反転する。
+/// GESTURE_ENABLED を反転し、反転後の値を返す純粋な状態遷移だけを担う。
+/// OS フックの着脱や UI 更新から切り離してあるので、実ハードウェアを
+/// 使わずに「1回クリックごとの決定的な反転」だけを検証できる。
+fn flip_gesture_enabled_state() -> bool {
     let mut enabled = GESTURE_ENABLED.lock().unwrap();
     *enabled = !*enabled;
-    let new_state = *enabled;
-    drop(enabled);
+    *enabled
+}
+
+fn toggle_gesture_enabled(_app: &AppHandle) {
+    let new_state = flip_gesture_enabled_state();
 
     if new_state {
         let result = mouse_hook::install_hook();
@@ -613,23 +633,14 @@ fn toggle_gesture_enabled(_app: &AppHandle) {
     }
 
     update_tray_icon(new_state);
-    if let Some(item) = TOGGLE_MENU_ITEM.get() {
-        let _ = item.set_text(toggle_menu_label(new_state));
-    }
 }
 
 fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
-    let quit = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
+    // 右クリックメニューは「設定を開く」と「終了」のみ。有効/無効の切り替えは
+    // 単純な左クリック1回で行うため、メニュー項目としては公開しない。
     let show = MenuItem::with_id(app, "show", "設定を開く", true, None::<&str>)?;
-    let toggle = MenuItem::with_id(
-        app,
-        "toggle_gesture",
-        toggle_menu_label(*GESTURE_ENABLED.lock().unwrap()),
-        true,
-        None::<&str>,
-    )?;
-    let menu = Menu::with_items(app, &[&show, &toggle, &quit])?;
-    let _ = TOGGLE_MENU_ITEM.set(toggle);
+    let quit = MenuItem::with_id(app, "quit", "終了", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
 
     let initial_enabled = *GESTURE_ENABLED.lock().unwrap();
     let icon = load_icon_from_bytes(tray_icon::icon_bytes_for_state(initial_enabled))
@@ -640,7 +651,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .icon(icon)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("GestureHotkeyApp")
+        .tooltip(tray_tooltip_for_state(initial_enabled))
         .on_menu_event(|app, event| match event.id.as_ref() {
             "quit" => {
                 // 明示終了時は必ずフックを外し、押しっぱなし状態を残さない。
@@ -650,7 +661,6 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 app.exit(0);
             }
             "show" => show_main_window(app),
-            "toggle_gesture" => toggle_gesture_enabled(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -660,11 +670,10 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
                 ..
             } = event
             {
-                // 単純な左クリックは通常のトレイアイコンと同様に設定ウィンドウを開くだけにする。
-                // 以前はここでジェスチャー全体を無音でON/OFFしていたため、
-                // ユーザーがアイコンを一度クリックしただけで全トリガーが反応しなくなる
-                // 不具合の原因になっていた。無効化操作は明示的なメニュー項目からのみ行う。
-                show_main_window(tray.app_handle());
+                // 単純な左クリック1回はジェスチャー有効/無効の切り替えのみを
+                // 行い、設定ウィンドウは開かない。設定ウィンドウは右クリック
+                // メニューの「設定を開く」からのみ開く。
+                toggle_gesture_enabled(tray.app_handle());
             }
         })
         .build(app)?;
@@ -824,6 +833,7 @@ pub fn run() {
             delete_action,
             set_gesture_enabled,
             is_gesture_enabled,
+            set_hook_capture_mode,
             get_autostart_status,
             set_autostart_enabled,
             get_config_file_path,
@@ -847,10 +857,34 @@ pub fn run() {
 mod tests {
     use super::*;
 
+    /// GESTURE_ENABLED は複数テストで共有されるプロセスグローバル状態のため、
+    /// このロックで直列化する。
+    static TRAY_STATE_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[test]
-    fn toggle_menu_label_reflects_gesture_state() {
-        assert_eq!(toggle_menu_label(true), "ジェスチャーを無効化");
-        assert_eq!(toggle_menu_label(false), "ジェスチャーを有効化");
+    fn tray_left_click_toggle_alternates_deterministically() {
+        let _guard = TRAY_STATE_TEST_LOCK.lock().unwrap();
+        *GESTURE_ENABLED.lock().unwrap() = true;
+
+        // Repeated left clicks (each calling the same safe toggle path the
+        // tray wires to its left-click handler) must alternate
+        // enabled -> disabled -> enabled -> disabled deterministically.
+        assert!(!flip_gesture_enabled_state());
+        assert!(*GESTURE_ENABLED.lock().unwrap() == false);
+        assert!(flip_gesture_enabled_state());
+        assert!(*GESTURE_ENABLED.lock().unwrap());
+        assert!(!flip_gesture_enabled_state());
+        assert!(*GESTURE_ENABLED.lock().unwrap() == false);
+
+        // Restore default for other tests.
+        *GESTURE_ENABLED.lock().unwrap() = true;
+    }
+
+    #[test]
+    fn tray_tooltip_reflects_enabled_and_disabled_state() {
+        assert_eq!(tray_tooltip_for_state(true), "GestureHotkeyApp (有効)");
+        assert_eq!(tray_tooltip_for_state(false), "GestureHotkeyApp (無効)");
+        assert_ne!(tray_tooltip_for_state(true), tray_tooltip_for_state(false));
     }
 
     #[test]

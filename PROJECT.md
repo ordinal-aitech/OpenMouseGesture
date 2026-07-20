@@ -161,9 +161,20 @@ This was fixed on July 18, 2026 after a regression where ordinary right-click st
 
 ### Current keyboard-trigger limitation
 
-Keyboard-trigger input is detected with a low-level keyboard hook, but the app does not consume or suppress the original key event for other applications. The registered trigger key or key combination is still delivered to the foreground application.
+Keyboard-trigger input is detected with a low-level keyboard hook, but the app does not consume or suppress the original key event for other applications, **except** for a modifier-free dedicated single-key trigger (see below), which is fully reserved and never delivered to other applications while assigned and gestures are enabled.
 
 This limitation should be treated as current product behavior, not a temporary doc omission.
+
+### Dedicated single-key triggers, third-party remap handling, and capture reliability (July 21, 2026)
+
+- A modifier-free `key:<Code>` trigger (e.g. `key:CapsLock`, `key:ShiftLeft`, `key:AltRight`, `key:F5`) is a dedicated key: `mouse_hook.rs` consumes its physical down/repeat/up while it is assigned and gestures are enabled, so it never reaches other applications and (for CapsLock) never toggles the CapsLock indicator.
+- Standalone Shift and Alt are now capturable and usable as dedicated triggers via their location-specific codes: `ShiftLeft`, `ShiftRight`, `AltLeft`, `AltRight`. `KeyboardEvent.code` is always location-specific per the Web spec (never a bare "Shift"/"Alt"), so a bare/generic modifier code is intentionally unsupported both in the settings UI and in `config::keyboard_code_to_vk`; only the four location-specific codes round-trip.
+- `WH_KEYBOARD_LL` reports Shift as its location-specific VK directly (`VK_LSHIFT`/`VK_RSHIFT`) but reports Ctrl/Alt as the generic VK (`VK_CONTROL`/`VK_MENU`), relying on the hook's extended-key flag to say which physical key it was. `mouse_hook::normalize_generic_modifier_vk` resolves this once, immediately after reading `vkCode`, so a dedicated `AltLeft`/`AltRight` trigger has one deterministic VK identity end-to-end instead of silently never matching a physical Alt press.
+- Root cause of mouse-vendor/remapper button mappings never triggering (including when mapped to CapsLock): the keyboard hook previously ignored **every** event carrying `LLKHF_INJECTED`, but common remapping software (e.g. a mouse button mapped to a keyboard key) emits its output via `SendInput`/`keybd_event`, which also carries `LLKHF_INJECTED`. The fix stamps every `SendInput` call OpenMouseGesture itself issues (CapsLock toggle correction, keystroke/text action dispatch) with a unique `dwExtraInfo` marker (`mouse_hook::SELF_INPUT_MARKER`) and only ignores injected events carrying that exact marker; other injected (third-party/remapper) keyboard events now flow through the same trigger-matching path as physical input, so a mouse button remapped to a configured dedicated key can trigger a gesture.
+- Root cause of an already-dedicated key becoming impossible to recapture/reassign from the Settings UI: the low-level hook runs system-wide and would consume that key's down event before the app's own Settings window (or any window) ever received it, so pressing an already-dedicated key while trying to reassign it silently did nothing. Fix: a `set_hook_capture_mode` Tauri command (backed by `mouse_hook::set_capture_mode_active`) tells the hook to pass every key through unconsumed and un-acted-on while the Settings capture UI is armed. The frontend (`SettingsTab.tsx`) turns this on when capture starts and off in the same effect's cleanup, which reliably fires on every exit path (successful capture, duplicate rejection, unsupported-key rejection, Escape cancellation, switching capture to a different slot, or unmounting) without needing to repeat the call at each call site.
+- Values written by builds that predate the "key:" prefix convention (a bare code such as `CapsLock` with no prefix) are migrated to the canonical `key:CapsLock` form in `config::normalize_trigger_binding` instead of being silently discarded and replaced by the slot's mouse default.
+- Duplicate dedicated-key validation (`Config::validate`) compares canonical parsed code identity (not raw string equality) and reports which slot already owns the conflicting key.
+- Japanese IME/kana-mode `KeyboardEvent.code` values (`KanaMode`, `Convert`, `NonConvert`, `Lang1`-`Lang5`, `IntlRo`, `IntlYen`, `Hiragana`, `Katakana`, `HiraganaKatakana`) remain unsupported and are rejected at capture time with an explicit message: they are not exposed as ordinary, reliably observable virtual keys through `WH_KEYBOARD_LL`, so accepting them would silently store a trigger the runtime hook can never match.
 
 ## Gesture and Action Model
 
@@ -362,8 +373,10 @@ The action-label overlay path remains in code, but it is intentionally disabled 
 ## Tray and Window Behavior
 
 - The tray icon is intended to be the primary background control surface.
-- Left-clicking the tray icon shows the main window.
-- The gesture enable/disable toggle is an explicit tray menu item.
+- As of July 21, 2026, a single left click on the tray icon toggles gesture handling enabled/disabled (`flip_gesture_enabled_state` + `toggle_gesture_enabled` in `lib.rs`), alternating deterministically enabled -> disabled -> enabled on repeated clicks. Left click no longer opens the Settings window.
+- The right-click menu contains only `設定を開く` (open Settings) and `終了` (quit); the enable/disable toggle is no longer a menu item.
+- Toggling via left click uses the same safe path as every other disable route in the app: disabling cancels any active/pending gesture session without dispatch (`mouse_hook::cancel_active_gesture_session`) before the low-level hook is uninstalled; enabling reinstalls the hook.
+- The tray icon asset and tooltip (`tray_tooltip_for_state`) update immediately on every toggle to reflect the current enabled/disabled state.
 - Choosing Quit uninstalls hooks before exit so normal right-click behavior is restored immediately.
 - Closing the main window hides it instead of terminating the process.
 - The main window is `visible: false` at creation regardless of launch mode (manual or autostart); it is only ever shown via the tray "設定を開く" menu item, a left click on the tray icon, or the tray-initialization-failed fallback in `run()`'s `setup()`, so autostart launches never flash or force-focus the window while still installing the mouse/keyboard hooks.

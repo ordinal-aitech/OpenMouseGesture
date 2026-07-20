@@ -5,6 +5,7 @@
 // 例: ExecuteKeystrokeChord(["Ctrl", "C"]) -> Ctrl+Cキー送信
 
 use crate::config::Action;
+use crate::mouse_hook::SELF_INPUT_MARKER;
 
 use windows::{
     core::*, Win32::Foundation::*, Win32::UI::Input::KeyboardAndMouse::*, Win32::UI::Shell::*,
@@ -105,7 +106,7 @@ fn synthesize_modifier_key_event(vk: u16, key_up: bool) {
                 wScan: vk_to_scan(virtual_key),
                 dwFlags: flags,
                 time: 0,
-                dwExtraInfo: 0,
+                dwExtraInfo: SELF_INPUT_MARKER,
             },
         },
     };
@@ -315,7 +316,7 @@ fn execute_keystroke_chord(keys: &[&str]) -> std::result::Result<(), String> {
                             wScan: vk_to_scan(m),
                             dwFlags: KEYEVENTF_SCANCODE,
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: SELF_INPUT_MARKER,
                         },
                     },
                 };
@@ -352,7 +353,7 @@ fn execute_keystroke_chord(keys: &[&str]) -> std::result::Result<(), String> {
                             wScan: 0,
                             dwFlags: KEYBD_EVENT_FLAGS(0),
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: SELF_INPUT_MARKER,
                         },
                     },
                 };
@@ -369,7 +370,7 @@ fn execute_keystroke_chord(keys: &[&str]) -> std::result::Result<(), String> {
                             wScan: vk_to_scan(vk),
                             dwFlags: KEYEVENTF_SCANCODE,
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: SELF_INPUT_MARKER,
                         },
                     },
                 };
@@ -408,7 +409,7 @@ fn execute_keystroke_chord(keys: &[&str]) -> std::result::Result<(), String> {
                             wScan: 0,
                             dwFlags: KEYEVENTF_KEYUP,
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: SELF_INPUT_MARKER,
                         },
                     },
                 };
@@ -425,7 +426,7 @@ fn execute_keystroke_chord(keys: &[&str]) -> std::result::Result<(), String> {
                             wScan: vk_to_scan(vk),
                             dwFlags: KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP,
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: SELF_INPUT_MARKER,
                         },
                     },
                 };
@@ -463,7 +464,7 @@ fn execute_keystroke_chord(keys: &[&str]) -> std::result::Result<(), String> {
                             wScan: vk_to_scan(m),
                             dwFlags: KEYEVENTF_SCANCODE | KEYEVENTF_KEYUP,
                             time: 0,
-                            dwExtraInfo: 0,
+                            dwExtraInfo: SELF_INPUT_MARKER,
                         },
                     },
                 };
@@ -588,7 +589,7 @@ fn send_unicode_text(text: &str) -> std::result::Result<(), String> {
                         wScan: code_unit,
                         dwFlags: KEYEVENTF_UNICODE,
                         time: 0,
-                        dwExtraInfo: 0,
+                        dwExtraInfo: SELF_INPUT_MARKER,
                     },
                 },
             };
@@ -631,7 +632,7 @@ pub fn send_right_click(x: i32, y: i32) {
             mouseData: 0,
             dwFlags: MOUSEEVENTF_RIGHTDOWN,
             time: 0,
-            dwExtraInfo: 0,
+            dwExtraInfo: SELF_INPUT_MARKER,
         };
 
         inputs[1].r#type = INPUT_MOUSE;
@@ -641,7 +642,7 @@ pub fn send_right_click(x: i32, y: i32) {
             mouseData: 0,
             dwFlags: MOUSEEVENTF_RIGHTUP,
             time: 0,
-            dwExtraInfo: 0,
+            dwExtraInfo: SELF_INPUT_MARKER,
         };
 
         let _ = SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);

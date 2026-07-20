@@ -13,6 +13,18 @@ use windows::{
 
 const LLMHF_INJECTED: u32 = 0x00000001;
 const LLKHF_INJECTED: u32 = 0x00000010;
+const LLKHF_EXTENDED: u32 = 0x00000001;
+/// `dwExtraInfo` marker stamped on every `SendInput` call OpenMouseGesture
+/// itself issues (CapsLock toggle correction, keystroke/text action
+/// dispatch). The keyboard hook uses this to distinguish "our own synthetic
+/// input" (always ignored, to avoid re-triggering ourselves) from
+/// third-party/remapper-injected input (a mouse-vendor tool or remapper
+/// commonly emits a keyboard event via `SendInput`/`keybd_event` for a mouse
+/// button mapping; those events also carry `LLKHF_INJECTED` but must still be
+/// eligible to match a configured trigger). Blanket-rejecting every injected
+/// event was the reason a mouse button remapped to a keyboard key (e.g.
+/// CapsLock) could never trigger a gesture.
+pub const SELF_INPUT_MARKER: usize = 0x4F4D_47F1;
 const SMALL_MOVE_POINTS: usize = 8;
 const PREVIEW_MIN_POINTS: usize = 6;
 const PREVIEW_INTERVAL_MS: u64 = 16;
@@ -116,6 +128,69 @@ static ESCAPE_CANCEL_CONSUMING: Mutex<bool> = Mutex::new(false);
 
 const VK_CAPITAL: u16 = 0x14;
 const VK_ESCAPE: u16 = 0x1B;
+const VK_SHIFT: u16 = 0x10;
+const VK_CONTROL: u16 = 0x11;
+const VK_MENU: u16 = 0x12;
+const VK_LSHIFT: u16 = 0xA0;
+const VK_RSHIFT: u16 = 0xA1;
+const VK_LCONTROL: u16 = 0xA2;
+const VK_RCONTROL: u16 = 0xA3;
+const VK_LMENU: u16 = 0xA4;
+const VK_RMENU: u16 = 0xA5;
+
+/// Settings UI capture mode: while active, the hook must not consume or
+/// start a gesture on any key (including one already dedicated to a
+/// trigger slot), so the capture listener in the Settings window can always
+/// observe the raw key the user presses — including re-capturing a key that
+/// is currently dedicated, which would otherwise never reach the app's own
+/// window because the low-level hook runs system-wide before any window
+/// receives the keystroke.
+static CAPTURE_MODE_ACTIVE: Mutex<bool> = Mutex::new(false);
+
+pub fn set_capture_mode_active(active: bool) {
+    *CAPTURE_MODE_ACTIVE.lock().unwrap() = active;
+}
+
+/// `WH_KEYBOARD_LL` reports Shift as its location-specific VK directly
+/// (`VK_LSHIFT`/`VK_RSHIFT`), but reports Ctrl/Alt as the generic VK
+/// (`VK_CONTROL`/`VK_MENU`) and relies on `LLKHF_EXTENDED` to say which
+/// physical key it was (set = right, clear = left). Without this
+/// normalization, a dedicated trigger stored as `AltLeft`/`AltRight`
+/// (VK 0xA4/0xA5) could never match a physical Alt press, since the hook
+/// would deliver the generic 0x12 instead. Applying this once, immediately
+/// after reading `vkCode`, gives every downstream check (dedicated-key
+/// matching, `PRESSED_KEYS`, modifier tracking) one deterministic identity
+/// per physical key.
+fn normalize_generic_modifier_vk(vk_code: u16, flags: u32) -> u16 {
+    let extended = (flags & LLKHF_EXTENDED) != 0;
+    match vk_code {
+        VK_CONTROL => {
+            if extended {
+                VK_RCONTROL
+            } else {
+                VK_LCONTROL
+            }
+        }
+        VK_MENU => {
+            if extended {
+                VK_RMENU
+            } else {
+                VK_LMENU
+            }
+        }
+        VK_SHIFT => {
+            // Not expected in practice (Shift already reports the specific
+            // VK), but fall back to the extended flag rather than leaving an
+            // ambiguous generic code unresolved.
+            if extended {
+                VK_RSHIFT
+            } else {
+                VK_LSHIFT
+            }
+        }
+        other => other,
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct KeyboardReleaseState {
@@ -750,7 +825,7 @@ fn synthesize_capslock_press() {
                     wScan: 0,
                     dwFlags: Default::default(),
                     time: 0,
-                    dwExtraInfo: 0,
+                    dwExtraInfo: SELF_INPUT_MARKER,
                 },
             },
         };
@@ -762,7 +837,7 @@ fn synthesize_capslock_press() {
                     wScan: 0,
                     dwFlags: KEYEVENTF_KEYUP,
                     time: 0,
-                    dwExtraInfo: 0,
+                    dwExtraInfo: SELF_INPUT_MARKER,
                 },
             },
         };
@@ -945,12 +1020,32 @@ unsafe extern "system" fn keyboard_hook_proc(
     }
 
     let keyboard_data = *(l_param.0 as *const KBDLLHOOKSTRUCT);
-    if (keyboard_data.flags.0 & LLKHF_INJECTED) != 0 {
+    // Only OpenMouseGesture's own synthetic input (stamped with
+    // `SELF_INPUT_MARKER`) is unconditionally ignored, to avoid re-entering
+    // trigger matching on our own dispatched keystrokes/CapsLock-toggle
+    // correction. A blanket `LLKHF_INJECTED` check here previously rejected
+    // every injected keyboard event, including the ones mouse-vendor
+    // remapping software commonly emits via `SendInput`/`keybd_event` to
+    // turn a mouse button into a keyboard key; that made a mouse button
+    // mapped to a configured key (e.g. CapsLock) unable to ever trigger a
+    // gesture. Third-party/remapper-injected events now flow through the
+    // same matching path as physical input.
+    if (keyboard_data.flags.0 & LLKHF_INJECTED) != 0
+        && keyboard_data.dwExtraInfo == SELF_INPUT_MARKER
+    {
         return CallNextHookEx(None, n_code, w_param, l_param);
     }
 
     let event_type = w_param.0 as u32;
-    let vk_code = keyboard_data.vkCode as u16;
+    let vk_code = normalize_generic_modifier_vk(keyboard_data.vkCode as u16, keyboard_data.flags.0);
+
+    // While the Settings capture UI is armed, never consume or act on any
+    // key: let every key (including one already dedicated to a trigger
+    // slot) reach the app's own window unmodified so it can be observed and
+    // (re)captured.
+    if *CAPTURE_MODE_ACTIVE.lock().unwrap() {
+        return CallNextHookEx(None, n_code, w_param, l_param);
+    }
 
     if vk_code == VK_ESCAPE {
         match event_type {
@@ -1840,5 +1935,70 @@ mod tests {
             &HashSet::from([VK_CAPITAL])
         )
         .is_some());
+    }
+
+    #[test]
+    fn dedicated_trigger_round_trips_shift_and_alt_left_right() {
+        // Shift/Alt must be usable as standalone dedicated triggers exactly
+        // like CapsLock, once their code resolves to the canonical
+        // location-specific VK (see `keyboard_code_to_vk`).
+        let config = config_with_triggers("key:ShiftLeft", "key:AltRight", "mouse:x1");
+        assert!(
+            trigger_slot_for_keyboard_down(&config, VK_LSHIFT, &HashSet::from([VK_LSHIFT]))
+                .is_some()
+        );
+        assert!(
+            trigger_slot_for_keyboard_down(&config, VK_RMENU, &HashSet::from([VK_RMENU]))
+                .is_some()
+        );
+        // The other Shift/Alt physical key must not spuriously match.
+        assert!(
+            trigger_slot_for_keyboard_down(&config, VK_RSHIFT, &HashSet::from([VK_RSHIFT]))
+                .is_none()
+        );
+        assert!(
+            trigger_slot_for_keyboard_down(&config, VK_LMENU, &HashSet::from([VK_LMENU]))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn normalize_generic_modifier_vk_resolves_ctrl_and_alt_by_extended_flag() {
+        // WH_KEYBOARD_LL reports Ctrl/Alt as the generic VK and relies on the
+        // extended-key flag to say which physical key it was; without this
+        // normalization a dedicated AltLeft/AltRight trigger could never
+        // match a real physical Alt press.
+        assert_eq!(normalize_generic_modifier_vk(VK_CONTROL, 0), VK_LCONTROL);
+        assert_eq!(
+            normalize_generic_modifier_vk(VK_CONTROL, LLKHF_EXTENDED),
+            VK_RCONTROL
+        );
+        assert_eq!(normalize_generic_modifier_vk(VK_MENU, 0), VK_LMENU);
+        assert_eq!(
+            normalize_generic_modifier_vk(VK_MENU, LLKHF_EXTENDED),
+            VK_RMENU
+        );
+        // Shift already arrives as the specific VK in practice and codes
+        // outside the modifier set must pass through unchanged.
+        assert_eq!(normalize_generic_modifier_vk(VK_LSHIFT, 0), VK_LSHIFT);
+        assert_eq!(normalize_generic_modifier_vk(VK_CAPITAL, 0), VK_CAPITAL);
+    }
+
+    #[test]
+    fn capture_mode_flag_defaults_off_and_is_toggleable() {
+        set_capture_mode_active(true);
+        assert!(*CAPTURE_MODE_ACTIVE.lock().unwrap());
+        set_capture_mode_active(false);
+        assert!(!*CAPTURE_MODE_ACTIVE.lock().unwrap());
+    }
+
+    #[test]
+    fn self_input_marker_is_only_matched_by_exact_value() {
+        // Sanity check that the marker used to distinguish OpenMouseGesture's
+        // own SendInput calls from third-party/remapper-injected input is a
+        // specific, non-zero value rather than something a real remapper
+        // could plausibly emit by coincidence (most tools leave dwExtraInfo
+        // at 0 or their own vendor-specific constant).
+        assert_ne!(SELF_INPUT_MARKER, 0);
     }
 }
