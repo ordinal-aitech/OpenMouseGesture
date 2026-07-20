@@ -203,7 +203,12 @@ pub fn display_key_for_code(code: &str) -> Option<String> {
     }
 
     if let Some(suffix) = code.strip_prefix("F") {
-        if suffix.parse::<u8>().ok().filter(|value| *value >= 1 && *value <= 24).is_some() {
+        if suffix
+            .parse::<u8>()
+            .ok()
+            .filter(|value| *value >= 1 && *value <= 24)
+            .is_some()
+        {
             return Some(code.to_string());
         }
     }
@@ -316,7 +321,11 @@ pub fn keyboard_code_to_vk(code: &str) -> Option<u16> {
 
 pub fn parse_keyboard_trigger(value: &str) -> Option<(Vec<String>, String)> {
     let payload = value.trim().strip_prefix("key:")?;
-    let parts: Vec<&str> = payload.split('+').map(|part| part.trim()).filter(|part| !part.is_empty()).collect();
+    let parts: Vec<&str> = payload
+        .split('+')
+        .map(|part| part.trim())
+        .filter(|part| !part.is_empty())
+        .collect();
     let (code, modifiers) = parts.split_last()?;
     let normalized_modifiers = normalize_trigger_modifiers(modifiers)?;
     if keyboard_code_to_vk(code).is_none() {
@@ -474,7 +483,9 @@ impl Action {
             self.trigger_type = default_trigger_type();
         }
 
-        if (self.trigger_type == "gesture" || self.trigger_type == "wheel") && self.trigger_slot.is_empty() {
+        if (self.trigger_type == "gesture" || self.trigger_type == "wheel")
+            && self.trigger_slot.is_empty()
+        {
             self.trigger_slot = default_trigger_slot();
         }
 
@@ -512,9 +523,7 @@ impl Action {
             )));
         }
 
-        if self.action_type == "text"
-            && self.text.as_ref().map_or(true, |s| s.trim().is_empty())
-        {
+        if self.action_type == "text" && self.text.as_ref().map_or(true, |s| s.trim().is_empty()) {
             return Err(ValidationError::MissingRequiredField("text".to_string()));
         }
 
@@ -629,6 +638,22 @@ impl Config {
             )));
         }
 
+        let mut dedicated_keys = HashSet::new();
+        for (slot, trigger) in [
+            ("A", &self.triggerA),
+            ("B", &self.triggerB),
+            ("C", &self.triggerC),
+        ] {
+            if let Some((modifiers, code)) = parse_keyboard_trigger(trigger) {
+                if modifiers.is_empty() && !dedicated_keys.insert(code.clone()) {
+                    return Err(ValidationError::InvalidValue(format!(
+                        "duplicate dedicated keyboard trigger in slot {}: {}",
+                        slot, code
+                    )));
+                }
+            }
+        }
+
         if !is_valid_hex_color(&self.triggerAColor) {
             return Err(ValidationError::InvalidValue(format!(
                 "invalid triggerAColor: {}",
@@ -718,7 +743,9 @@ fn sanitize_left_click_triggers_in_raw_json(content: &str) -> (String, Vec<&'sta
         }
 
         let value_start = cursor + 1;
-        let value_end = content[value_start..].find('"').map(|offset| value_start + offset)?;
+        let value_end = content[value_start..]
+            .find('"')
+            .map(|offset| value_start + offset)?;
         if is_left_mouse_trigger(&content[value_start..value_end]) {
             Some((value_start..value_end, slot))
         } else {
@@ -1227,8 +1254,14 @@ mod tests {
 
     #[test]
     fn legacy_mouse_triggers_migrate_to_unified_format() {
-        assert_eq!(normalize_trigger_binding("right", "mouse:right"), "mouse:right");
-        assert_eq!(normalize_trigger_binding("middle", "mouse:middle"), "mouse:middle");
+        assert_eq!(
+            normalize_trigger_binding("right", "mouse:right"),
+            "mouse:right"
+        );
+        assert_eq!(
+            normalize_trigger_binding("middle", "mouse:middle"),
+            "mouse:middle"
+        );
         assert_eq!(normalize_trigger_binding("x1", "mouse:x1"), "mouse:x1");
         assert_eq!(normalize_trigger_binding("x2", "mouse:x2"), "mouse:x2");
     }
@@ -1246,7 +1279,10 @@ mod tests {
         // unassigned state instead of being normalized to "mouse:left", and
         // must fail raw validation if it somehow appears on disk.
         for input in ["left", "mouse:left", "Left", "MOUSE:LEFT", " mouse:left "] {
-            assert_eq!(normalize_trigger_binding(input, "mouse:right"), UNASSIGNED_TRIGGER);
+            assert_eq!(
+                normalize_trigger_binding(input, "mouse:right"),
+                UNASSIGNED_TRIGGER
+            );
             assert!(!is_valid_trigger_binding(input));
         }
     }
@@ -1272,6 +1308,14 @@ mod tests {
     fn modifier_only_keyboard_trigger_is_rejected() {
         assert!(parse_keyboard_trigger("key:Shift").is_none());
         assert!(parse_keyboard_trigger("key:Ctrl+Alt").is_none());
+    }
+
+    #[test]
+    fn duplicate_dedicated_keyboard_triggers_are_rejected() {
+        let mut config = Config::default();
+        config.triggerA = "key:CapsLock".to_string();
+        config.triggerB = "key:CapsLock".to_string();
+        assert!(config.validate().is_err());
     }
 
     #[test]
@@ -1319,7 +1363,10 @@ mod tests {
 
     #[test]
     fn unassigned_trigger_binding_is_valid_and_stable() {
-        assert_eq!(normalize_trigger_binding("", "mouse:right"), UNASSIGNED_TRIGGER);
+        assert_eq!(
+            normalize_trigger_binding("", "mouse:right"),
+            UNASSIGNED_TRIGGER
+        );
         assert!(is_valid_trigger_binding(""));
         assert!(Config {
             triggerA: UNASSIGNED_TRIGGER.to_string(),
@@ -1374,7 +1421,8 @@ mod tests {
         assert_eq!(loaded.triggerC, "mouse:x1");
 
         let persisted: Config = serde_json::from_str(
-            &fs::read_to_string(temp_dir.join("config.json")).expect("sanitized config should exist"),
+            &fs::read_to_string(temp_dir.join("config.json"))
+                .expect("sanitized config should exist"),
         )
         .expect("sanitized config should parse");
         assert_eq!(persisted.triggerA, UNASSIGNED_TRIGGER);
@@ -1386,7 +1434,8 @@ mod tests {
             .map(|entry| entry.path())
             .expect("backup directory should exist");
         let backup_config: Config = serde_json::from_str(
-            &fs::read_to_string(backup_dir.join("config.json")).expect("backup config should exist"),
+            &fs::read_to_string(backup_dir.join("config.json"))
+                .expect("backup config should exist"),
         )
         .expect("backup config should parse");
         assert_eq!(backup_config.triggerA, "mouse:left");
@@ -1452,8 +1501,14 @@ mod tests {
             triggerB: "mouse:right".to_string(),
             triggerC: "mouse:x1".to_string(),
             groups: vec![
-                ActionGroup { id: "group-general".to_string(), name: "一般".to_string() },
-                ActionGroup { id: "group-clipboard".to_string(), name: "クリップボード".to_string() },
+                ActionGroup {
+                    id: "group-general".to_string(),
+                    name: "一般".to_string(),
+                },
+                ActionGroup {
+                    id: "group-clipboard".to_string(),
+                    name: "クリップボード".to_string(),
+                },
             ],
             ..Config::default()
         };
@@ -1478,23 +1533,37 @@ mod tests {
     #[test]
     fn valid_custom_20_action_config_survives_load_save_unchanged() {
         let temp_dir = unique_temp_dir("custom-20-actions-roundtrip");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let original = sample_rich_config(20);
 
-        manager.save_config(&original).expect("custom config should save");
+        manager
+            .save_config(&original)
+            .expect("custom config should save");
         let loaded = manager.load_config().expect("custom config should load");
 
         assert_eq!(loaded.actions.len(), 20);
         assert_eq!(
-            loaded.actions.iter().map(|a| a.name.clone()).collect::<Vec<_>>(),
-            original.actions.iter().map(|a| a.name.clone()).collect::<Vec<_>>()
+            loaded
+                .actions
+                .iter()
+                .map(|a| a.name.clone())
+                .collect::<Vec<_>>(),
+            original
+                .actions
+                .iter()
+                .map(|a| a.name.clone())
+                .collect::<Vec<_>>()
         );
     }
 
     #[test]
     fn missing_optional_fields_are_filled_without_dropping_actions() {
         let temp_dir = unique_temp_dir("missing-fields-fill");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
 
         // Hand-write JSON missing trigger_slot/group_id-normalization inputs,
         // mirroring an older config version with fewer fields per action.
@@ -1512,7 +1581,9 @@ mod tests {
 }"#;
         fs::write(temp_dir.join("config.json"), raw).expect("raw config should write");
 
-        let loaded = manager.load_config().expect("config with missing optional fields should load");
+        let loaded = manager
+            .load_config()
+            .expect("config with missing optional fields should load");
         assert_eq!(loaded.actions.len(), 2);
         // defaults fill in trigger_type/trigger_slot but do not touch the actions themselves
         assert_eq!(loaded.actions[0].trigger_type, "gesture");
@@ -1522,26 +1593,36 @@ mod tests {
     #[test]
     fn malformed_config_is_preserved_not_silently_replaced() {
         let temp_dir = unique_temp_dir("malformed-preserved");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let malformed = "{ this is not valid json";
         fs::write(temp_dir.join("config.json"), malformed).expect("malformed config should write");
 
         let result = manager.load_config();
-        assert!(result.is_err(), "malformed config must surface an error, not silently succeed");
+        assert!(
+            result.is_err(),
+            "malformed config must surface an error, not silently succeed"
+        );
 
         // The original malformed file must remain untouched on disk - no
         // silent overwrite with defaults happened.
-        let on_disk = fs::read_to_string(temp_dir.join("config.json")).expect("file should still exist");
+        let on_disk =
+            fs::read_to_string(temp_dir.join("config.json")).expect("file should still exist");
         assert_eq!(on_disk, malformed);
     }
 
     #[test]
     fn first_run_creates_default_config() {
         let temp_dir = unique_temp_dir("first-run-defaults");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         assert!(!temp_dir.join("config.json").exists());
 
-        let loaded = manager.load_config().expect("first run should create defaults");
+        let loaded = manager
+            .load_config()
+            .expect("first run should create defaults");
         assert!(!loaded.actions.is_empty());
         assert!(temp_dir.join("config.json").exists());
     }
@@ -1549,9 +1630,13 @@ mod tests {
     #[test]
     fn repeated_startup_load_is_idempotent_and_preserves_custom_actions() {
         let temp_dir = unique_temp_dir("idempotent-startup");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let original = sample_rich_config(21);
-        manager.save_config(&original).expect("custom config should save");
+        manager
+            .save_config(&original)
+            .expect("custom config should save");
 
         let first_load = manager.load_config().expect("first load should succeed");
         let second_load = manager.load_config().expect("second load should succeed");
@@ -1567,7 +1652,9 @@ mod tests {
     #[test]
     fn five_action_defaults_never_replace_a_valid_richer_custom_set() {
         let temp_dir = unique_temp_dir("no-default-override");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let rich = sample_rich_config(21);
         manager.save_config(&rich).expect("rich config should save");
 
@@ -1575,14 +1662,20 @@ mod tests {
         // down to the bundled 5-action default template.
         for _ in 0..3 {
             let loaded = manager.load_config().expect("load should succeed");
-            assert_eq!(loaded.actions.len(), 21, "custom actions must not be replaced by defaults");
+            assert_eq!(
+                loaded.actions.len(),
+                21,
+                "custom actions must not be replaced by defaults"
+            );
         }
     }
 
     #[test]
     fn left_click_sanitation_preserves_actions_array() {
         let temp_dir = unique_temp_dir("left-click-preserves-actions");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let mut config = sample_rich_config(21);
         config.triggerA = "mouse:left".to_string();
 
@@ -1591,19 +1684,30 @@ mod tests {
         let raw = serde_json::to_string_pretty(&config).expect("config should serialize");
         fs::write(temp_dir.join("config.json"), raw).expect("config should write");
 
-        let loaded = manager.load_config().expect("config should load and sanitize");
+        let loaded = manager
+            .load_config()
+            .expect("config should load and sanitize");
         assert_eq!(loaded.triggerA, UNASSIGNED_TRIGGER);
-        assert_eq!(loaded.actions.len(), 21, "sanitizing left-click must not drop actions");
+        assert_eq!(
+            loaded.actions.len(),
+            21,
+            "sanitizing left-click must not drop actions"
+        );
     }
 
     #[test]
     fn destructive_reset_backs_up_existing_files_first() {
         let temp_dir = unique_temp_dir("destructive-reset-backup");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let rich = sample_rich_config(21);
         manager.save_config(&rich).expect("rich config should save");
         manager
-            .save_gestures(&[GestureTemplate { name: "左".to_string(), points: vec![(0.0, 0.0), (1.0, 1.0)] }])
+            .save_gestures(&[GestureTemplate {
+                name: "左".to_string(),
+                points: vec![(0.0, 0.0), (1.0, 1.0)],
+            }])
             .expect("gestures should save");
 
         let backup_dir = manager
@@ -1611,21 +1715,32 @@ mod tests {
             .expect("backup should succeed before any destructive fallback write");
 
         let backed_up_config: Config = serde_json::from_str(
-            &fs::read_to_string(backup_dir.join("config.json")).expect("backup config should exist"),
+            &fs::read_to_string(backup_dir.join("config.json"))
+                .expect("backup config should exist"),
         )
         .expect("backup config should parse");
-        assert_eq!(backed_up_config.actions.len(), 21, "backup must capture the full custom set");
+        assert_eq!(
+            backed_up_config.actions.len(),
+            21,
+            "backup must capture the full custom set"
+        );
         assert!(backup_dir.join("gestures.json").exists());
     }
 
     #[test]
     fn serialization_reload_preserves_restored_actions() {
         let temp_dir = unique_temp_dir("serialization-reload");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let restored = sample_rich_config(21);
 
-        manager.save_config(&restored).expect("restored config should save");
-        let reloaded = manager.load_config().expect("restored config should reload");
+        manager
+            .save_config(&restored)
+            .expect("restored config should save");
+        let reloaded = manager
+            .load_config()
+            .expect("restored config should reload");
 
         assert_eq!(reloaded.actions.len(), restored.actions.len());
         for (original, reloaded_action) in restored.actions.iter().zip(reloaded.actions.iter()) {
@@ -1658,10 +1773,18 @@ mod tests {
         // The action appears exactly once across the whole action list -
         // moving groups must never duplicate it.
         assert_eq!(
-            normalized.actions.iter().filter(|a| a.name == "action-1").count(),
+            normalized
+                .actions
+                .iter()
+                .filter(|a| a.name == "action-1")
+                .count(),
             1
         );
-        assert_eq!(normalized.actions.len(), 3, "no action must be dropped or duplicated by a group move");
+        assert_eq!(
+            normalized.actions.len(),
+            3,
+            "no action must be dropped or duplicated by a group move"
+        );
     }
 
     #[test]
@@ -1671,7 +1794,11 @@ mod tests {
 
         config.actions[1].group_id = "group-clipboard".to_string();
         let normalized = config.normalized();
-        let moved = normalized.actions.iter().find(|a| a.name == "action-1").unwrap();
+        let moved = normalized
+            .actions
+            .iter()
+            .find(|a| a.name == "action-1")
+            .unwrap();
 
         assert_eq!(moved.name, original.name);
         assert_eq!(moved.trigger_type, original.trigger_type);
@@ -1680,7 +1807,10 @@ mod tests {
         assert_eq!(moved.action_type, original.action_type);
         assert_eq!(moved.keystroke, original.keystroke);
         assert_eq!(moved.modifiers, original.modifiers);
-        assert_ne!(moved.group_id, original.group_id, "only group_id should have changed");
+        assert_ne!(
+            moved.group_id, original.group_id,
+            "only group_id should have changed"
+        );
     }
 
     #[test]
@@ -1695,7 +1825,11 @@ mod tests {
             assert_eq!(normalized.actions[0].group_id, group.id);
             // Moving must never invent a duplicate of an already-known group.
             assert_eq!(
-                normalized.groups.iter().filter(|g| g.id == group.id).count(),
+                normalized
+                    .groups
+                    .iter()
+                    .filter(|g| g.id == group.id)
+                    .count(),
                 1
             );
         }
@@ -1709,31 +1843,54 @@ mod tests {
         let normalized = config.normalized();
 
         assert_eq!(normalized.actions[0].group_id, DEFAULT_GROUP_ID, "an action referencing a deleted group must fall back to the default group, not be dropped");
-        assert_eq!(normalized.actions.len(), 2, "the action must survive the fallback, not be dropped");
+        assert_eq!(
+            normalized.actions.len(),
+            2,
+            "the action must survive the fallback, not be dropped"
+        );
         assert!(normalized.groups.iter().any(|g| g.id == DEFAULT_GROUP_ID));
     }
 
     #[test]
     fn group_reassignment_survives_save_and_reload() {
         let temp_dir = unique_temp_dir("group-reassignment-roundtrip");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
         let mut config = sample_rich_config(5);
-        manager.save_config(&config).expect("initial config should save");
+        manager
+            .save_config(&config)
+            .expect("initial config should save");
 
         config.actions[2].group_id = "group-clipboard".to_string();
-        manager.save_config(&config).expect("reassigned config should save");
+        manager
+            .save_config(&config)
+            .expect("reassigned config should save");
 
-        let reloaded = manager.load_config().expect("reassigned config should reload");
-        assert_eq!(reloaded.actions.len(), 5, "reload must not drop or duplicate actions");
+        let reloaded = manager
+            .load_config()
+            .expect("reassigned config should reload");
+        assert_eq!(
+            reloaded.actions.len(),
+            5,
+            "reload must not drop or duplicate actions"
+        );
         assert_eq!(reloaded.actions[2].group_id, "group-clipboard");
         assert_eq!(
-            reloaded.actions.iter().filter(|a| a.name == "action-2").count(),
+            reloaded
+                .actions
+                .iter()
+                .filter(|a| a.name == "action-2")
+                .count(),
             1,
             "the reassigned action must appear exactly once after reload"
         );
         for (idx, action) in reloaded.actions.iter().enumerate() {
             if idx != 2 {
-                assert_eq!(action.group_id, "group-general", "unrelated actions must keep their original group");
+                assert_eq!(
+                    action.group_id, "group-general",
+                    "unrelated actions must keep their original group"
+                );
             }
         }
     }
@@ -1796,7 +1953,11 @@ mod tests {
         ];
         migrate_legacy_wheel_actions(&mut actions);
 
-        assert_eq!(actions.len(), 2, "no action may be dropped during migration");
+        assert_eq!(
+            actions.len(),
+            2,
+            "no action may be dropped during migration"
+        );
         assert_eq!(actions[0].trigger_slot, "A");
         assert_eq!(actions[0].wheel_trigger.as_deref(), Some("wheel_up"));
         assert_eq!(actions[1].wheel_trigger.as_deref(), Some("wheel_up"));
@@ -1816,7 +1977,11 @@ mod tests {
         ];
         migrate_legacy_wheel_actions(&mut actions);
 
-        assert_eq!(actions.len(), 4, "action must be retained even when every slot is occupied");
+        assert_eq!(
+            actions.len(),
+            4,
+            "action must be retained even when every slot is occupied"
+        );
         assert_eq!(actions[3].wheel_trigger.as_deref(), Some("wheel_up"));
     }
 
@@ -1834,8 +1999,15 @@ mod tests {
         config.actions = vec![wheel_action("", "leftclick_wheel_down")];
         let normalized = config.normalized();
 
-        assert_eq!(normalized.actions.len(), 1, "legacy wheel action must survive normalization");
-        assert_eq!(normalized.actions[0].wheel_trigger.as_deref(), Some("wheel_down"));
+        assert_eq!(
+            normalized.actions.len(),
+            1,
+            "legacy wheel action must survive normalization"
+        );
+        assert_eq!(
+            normalized.actions[0].wheel_trigger.as_deref(),
+            Some("wheel_down")
+        );
         assert_eq!(normalized.actions[0].trigger_slot, "A");
     }
 
@@ -1884,7 +2056,10 @@ mod tests {
         let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
 
         let missing = text_action("");
-        let missing = Action { text: None, ..missing };
+        let missing = Action {
+            text: None,
+            ..missing
+        };
         assert!(missing.validate(&known_groups).is_err());
 
         let blank = text_action("   \n  ").normalized();
@@ -1930,14 +2105,24 @@ mod tests {
     #[test]
     fn text_action_serialization_round_trips_unicode_and_line_breaks() {
         let temp_dir = unique_temp_dir("text-action-roundtrip");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
 
         let mut config = Config::default();
-        config.actions = vec![text_action("メール: user@example.co.jp\n複数行\nテキスト").normalized()];
-        config.groups = vec![ActionGroup { id: DEFAULT_GROUP_ID.to_string(), name: "未分類".to_string() }];
+        config.actions =
+            vec![text_action("メール: user@example.co.jp\n複数行\nテキスト").normalized()];
+        config.groups = vec![ActionGroup {
+            id: DEFAULT_GROUP_ID.to_string(),
+            name: "未分類".to_string(),
+        }];
 
-        manager.save_config(&config).expect("config with text action should save");
-        let reloaded = manager.load_config().expect("config with text action should reload");
+        manager
+            .save_config(&config)
+            .expect("config with text action should save");
+        let reloaded = manager
+            .load_config()
+            .expect("config with text action should reload");
 
         assert_eq!(reloaded.actions.len(), 1);
         assert_eq!(reloaded.actions[0].action_type, "text");
@@ -1952,7 +2137,9 @@ mod tests {
         // Older configs on disk never had a `text` field at all. Loading one must
         // not fail, and every action's `text` must default to None.
         let temp_dir = unique_temp_dir("legacy-config-no-text-field");
-        let manager = ConfigManager { config_dir: temp_dir.clone() };
+        let manager = ConfigManager {
+            config_dir: temp_dir.clone(),
+        };
 
         let legacy_json = r#"{
             "trajectory": true,
@@ -1967,7 +2154,9 @@ mod tests {
         }"#;
         fs::write(temp_dir.join("config.json"), legacy_json).unwrap();
 
-        let loaded = manager.load_config().expect("legacy config without text field should load");
+        let loaded = manager
+            .load_config()
+            .expect("legacy config without text field should load");
         assert_eq!(loaded.actions.len(), 1);
         assert_eq!(loaded.actions[0].text, None);
     }

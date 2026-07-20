@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useStore } from "../../store/useStore";
 import * as api from "../../api/commands";
-import type { Config, GestureTrigger, MouseTriggerButton, TriggerModifier, TriggerSlot } from "../../types";
+import type { Config, GestureTrigger, MouseTriggerButton, TriggerSlot } from "../../types";
 import { confirm, message, open, save } from "@tauri-apps/plugin-dialog";
 import "./SettingsTab.css";
 
 const CAPTURE_ARM_DELAY_MS = 150;
 const LEGACY_MOUSE_TRIGGERS = new Set(["left", "right", "middle", "x1", "x2"]);
-const MODIFIER_ORDER: TriggerModifier[] = ["Ctrl", "Alt", "Shift"];
 
 const mouseButtonMap: Record<number, MouseTriggerButton | undefined> = {
   0: "left",
@@ -82,7 +81,7 @@ function serializeMouseTrigger(button: MouseTriggerButton) {
   return `mouse:${button}`;
 }
 
-function serializeKeyboardTrigger(modifiers: TriggerModifier[], code: string) {
+function serializeKeyboardTrigger(modifiers: string[], code: string) {
   const parts = [...modifiers, code];
   return `key:${parts.join("+")}`;
 }
@@ -155,20 +154,9 @@ function buildKeyboardTrigger(event: KeyboardEvent): string | null {
     return null;
   }
 
-  const modifiers = MODIFIER_ORDER.filter((modifier) => {
-    switch (modifier) {
-      case "Ctrl":
-        return event.ctrlKey;
-      case "Alt":
-        return event.altKey;
-      case "Shift":
-        return event.shiftKey;
-      default:
-        return false;
-    }
-  });
-
-  return serializeKeyboardTrigger(modifiers, code);
+  // New captures deliberately use one dedicated key. Existing modifier
+  // combinations remain loadable for compatibility, but are not created here.
+  return serializeKeyboardTrigger([], code);
 }
 
 interface TriggerSettingProps {
@@ -201,7 +189,7 @@ function TriggerSettingRow({
             {isCapturing ? "入力待機中..." : "登録"}
           </button>
         </div>
-        <p className="trigger-setting-hint">登録を押したあとにマウスボタンかキーボード入力を実際に押してください。Esc でキャンセルできます。</p>
+        <p className="trigger-setting-hint">単一キーの利用を推奨します。ジェスチャー有効中、登録したキーボードキーは OpenMouseGesture 専用になり、通常の Windows／アプリ操作には使えません。Esc でキャンセルできます。</p>
         {isLeftMouseTrigger(trigger) && <p className="trigger-warning">Mouse Left は通常の左クリック操作と競合する可能性があります。</p>}
         {duplicateOf && <p className="trigger-warning">Trigger {duplicateOf} と同じ入力です。先に判定される Trigger が優先され、こちらは反応しません。</p>}
       </div>
@@ -333,6 +321,11 @@ export function SettingsTab() {
 
   const applyCapturedTrigger = useCallback(
     (slot: TriggerSlot, trigger: GestureTrigger) => {
+      const otherTriggers = slot === "A" ? [triggerB, triggerC] : slot === "B" ? [triggerA, triggerC] : [triggerA, triggerB];
+      if (trigger.startsWith("key:") && !trigger.includes("+") && otherTriggers.includes(trigger)) {
+        setError("That dedicated keyboard key is already assigned to another trigger.");
+        return;
+      }
       setCaptureSlot(null);
       switch (slot) {
         case "A":
@@ -349,7 +342,7 @@ export function SettingsTab() {
           break;
       }
     },
-    [persistConfig]
+    [persistConfig, triggerA, triggerB, triggerC]
   );
 
   useEffect(() => {
@@ -528,7 +521,7 @@ export function SettingsTab() {
             Trigger A / B / C ごとに登録ボタンを押し、使いたいマウスボタンまたはキーボード入力をそのまま押して登録します。
           </p>
           <p className="section-desc section-desc-warning">
-            キーボードトリガー入力の抑止は今回未対応です。登録したキー入力は他アプリにもそのまま届きます。
+            キーボードトリガーは有効中に専用キーとして抑止されます。単一キーを推奨します。既存の修飾キー組合せは互換のため読み込めますが、新規登録では使用しません。
           </p>
 
           <TriggerSettingRow

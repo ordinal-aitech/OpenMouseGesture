@@ -14,6 +14,9 @@ const PREVIEW_MIN_POINTS: usize = 6;
 const PREVIEW_INTERVAL_MS: u64 = 16;
 const DIAG_LOG_MAX_BYTES: u64 = 2_000_000;
 const DIAG_MOVE_LOG_INTERVAL_MS: u64 = 200;
+/// キーボード専用トリガーの keyup を確定するまでの猶予時間（ミリ秒）。
+/// 一時的な keyup/key down チャタリングでは軌跡を維持し、確定した release だけを終了にする。
+pub const TRIGGER_RELEASE_GRACE_MS: u64 = 120;
 
 /// 診断ログはデフォルト無効。`OMG_DEBUG_HOOK=1` を設定して起動するか、
 /// `<config_dir>/ENABLE_HOOK_DEBUG` マーカーファイルを起動前に置いた場合のみ、
@@ -21,7 +24,10 @@ const DIAG_MOVE_LOG_INTERVAL_MS: u64 = 200;
 /// マーカーファイルはコンソールを使わずにGUI起動のまま診断を有効化するためのもの。
 fn diag_enabled() -> bool {
     static ENABLED: LazyLock<bool> = LazyLock::new(|| {
-        if std::env::var("OMG_DEBUG_HOOK").map(|v| v == "1").unwrap_or(false) {
+        if std::env::var("OMG_DEBUG_HOOK")
+            .map(|v| v == "1")
+            .unwrap_or(false)
+        {
             return true;
         }
         crate::config::ConfigManager::new()
@@ -53,11 +59,21 @@ fn diag_log(message: impl AsRef<str>) {
         }
     }
 
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default();
-        let _ = writeln!(file, "[{}.{:03}] {}", now.as_secs(), now.subsec_millis(), message.as_ref());
+        let _ = writeln!(
+            file,
+            "[{}.{:03}] {}",
+            now.as_secs(),
+            now.subsec_millis(),
+            message.as_ref()
+        );
     }
 }
 
@@ -66,7 +82,9 @@ fn diag_should_log_move() -> bool {
     let mut last = LAST_MOVE_LOG.lock().unwrap();
     let now = Instant::now();
     let should = match *last {
-        Some(previous) => now.duration_since(previous) >= Duration::from_millis(DIAG_MOVE_LOG_INTERVAL_MS),
+        Some(previous) => {
+            now.duration_since(previous) >= Duration::from_millis(DIAG_MOVE_LOG_INTERVAL_MS)
+        }
         None => true,
     };
     if should {
@@ -86,6 +104,62 @@ static ACTIVE_TRIGGER_SLOT: Mutex<Option<String>> = Mutex::new(None);
 static LAST_PREVIEW_AT: Mutex<Option<Instant>> = Mutex::new(None);
 static LAST_PREVIEW_KEY: Mutex<Option<String>> = Mutex::new(None);
 static PRESSED_KEYS: LazyLock<Mutex<HashSet<u16>>> = LazyLock::new(|| Mutex::new(HashSet::new()));
+static KEYBOARD_RELEASE_STATE: Mutex<KeyboardReleaseState> =
+    Mutex::new(KeyboardReleaseState::new());
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct KeyboardReleaseState {
+    active_key: Option<u16>,
+    generation: u64,
+    release_pending: bool,
+}
+
+impl KeyboardReleaseState {
+    const fn new() -> Self {
+        Self {
+            active_key: None,
+            generation: 0,
+            release_pending: false,
+        }
+    }
+
+    fn begin(&mut self, key: u16) {
+        self.generation = self.generation.wrapping_add(1);
+        self.active_key = Some(key);
+        self.release_pending = false;
+    }
+
+    fn enter_release_pending(&mut self, key: u16) -> Option<u64> {
+        if self.active_key != Some(key) || self.release_pending {
+            return None;
+        }
+        self.release_pending = true;
+        Some(self.generation)
+    }
+
+    fn resume(&mut self, key: u16) -> bool {
+        if self.active_key == Some(key) && self.release_pending {
+            self.release_pending = false;
+            return true;
+        }
+        false
+    }
+
+    fn take_confirmed_release(&mut self, key: u16, generation: u64) -> bool {
+        if self.active_key == Some(key) && self.generation == generation && self.release_pending {
+            self.active_key = None;
+            self.release_pending = false;
+            return true;
+        }
+        false
+    }
+
+    fn clear(&mut self) {
+        self.active_key = None;
+        self.release_pending = false;
+        self.generation = self.generation.wrapping_add(1);
+    }
+}
 
 /// 設定側の検証をすり抜けて "left"/"mouse:left" が config に混入しても、
 /// フックが左クリックをトリガーとして掴まないようにする最終防衛ライン。
@@ -320,7 +394,10 @@ fn keyboard_trigger_active(trigger: &str, keys: &HashSet<u16>) -> bool {
     let Some(vk_code) = crate::config::keyboard_code_to_vk(&code) else {
         return false;
     };
-    keys.contains(&vk_code) && modifiers.iter().all(|modifier| modifier_pressed(keys, modifier))
+    keys.contains(&vk_code)
+        && modifiers
+            .iter()
+            .all(|modifier| modifier_pressed(keys, modifier))
 }
 
 fn keyboard_trigger_starts_on_vk(trigger: &str, vk_code: u16, keys: &HashSet<u16>) -> bool {
@@ -330,7 +407,10 @@ fn keyboard_trigger_starts_on_vk(trigger: &str, vk_code: u16, keys: &HashSet<u16
     let Some(trigger_vk) = crate::config::keyboard_code_to_vk(&code) else {
         return false;
     };
-    trigger_vk == vk_code && modifiers.iter().all(|modifier| modifier_pressed(keys, modifier))
+    trigger_vk == vk_code
+        && modifiers
+            .iter()
+            .all(|modifier| modifier_pressed(keys, modifier))
 }
 
 fn trigger_slot_for_mouse_down(
@@ -383,11 +463,73 @@ fn trigger_slot_for_keyboard_down(
     keys: &HashSet<u16>,
 ) -> Option<&'static str> {
     for slot in ["A", "B", "C"] {
-        if keyboard_trigger_starts_on_vk(crate::trigger_button_for_slot(config, slot), vk_code, keys) {
+        if keyboard_trigger_starts_on_vk(
+            crate::trigger_button_for_slot(config, slot),
+            vk_code,
+            keys,
+        ) {
             return Some(slot);
         }
     }
     None
+}
+
+/// 修飾キーを伴わないキーボードトリガーだけを、通常のキー機能を完全に予約する専用キーとして扱う。
+/// 既存の組合せトリガーは読み込み互換性のため検出だけを維持し、ここでは予約しない。
+fn dedicated_keyboard_slot_for_vk(
+    config: &crate::config::Config,
+    vk_code: u16,
+) -> Option<&'static str> {
+    for slot in ["A", "B", "C"] {
+        let Some((modifiers, code)) =
+            crate::config::parse_keyboard_trigger(crate::trigger_button_for_slot(config, slot))
+        else {
+            continue;
+        };
+        if modifiers.is_empty() && crate::config::keyboard_code_to_vk(&code) == Some(vk_code) {
+            return Some(slot);
+        }
+    }
+    None
+}
+
+fn trigger_key_is_physically_down(vk_code: u16) -> bool {
+    let state = unsafe { GetAsyncKeyState(vk_code as i32) };
+    (state as u16 & 0x8000) != 0
+}
+
+fn schedule_confirmed_keyboard_release(
+    config: crate::config::Config,
+    slot: String,
+    key: u16,
+    generation: u64,
+) {
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(TRIGGER_RELEASE_GRACE_MS));
+
+        if trigger_key_is_physically_down(key) || !crate::is_gesture_enabled_internal() {
+            return;
+        }
+        if PRESSED_KEYS.lock().unwrap().contains(&key) {
+            return;
+        }
+        if !KEYBOARD_RELEASE_STATE
+            .lock()
+            .unwrap()
+            .take_confirmed_release(key, generation)
+        {
+            return;
+        }
+        if *IS_DRAGGING.lock().unwrap()
+            && ACTIVE_TRIGGER_SLOT.lock().unwrap().as_deref() == Some(slot.as_str())
+        {
+            diag_log(format!(
+                "keyboard trigger release confirmed: slot={} key={:#04x}",
+                slot, key
+            ));
+            complete_gesture(&config, &slot);
+        }
+    });
 }
 
 fn current_cursor_point() -> POINT {
@@ -413,7 +555,10 @@ fn resolve_window_for_point(point: POINT) -> HWND {
 }
 
 fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, current_window: HWND) {
-    diag_log(format!("gesture-session begin slot={} point=({},{})", slot, point.x, point.y));
+    diag_log(format!(
+        "gesture-session begin slot={} point=({},{})",
+        slot, point.x, point.y
+    ));
     *GESTURE_START_WINDOW.lock().unwrap() = Some(current_window.0 as isize);
     *IS_DRAGGING.lock().unwrap() = true;
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = Some(slot.to_string());
@@ -467,7 +612,10 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
         let templates = ACTIVE_TEMPLATES.lock().unwrap().clone();
 
         if let Some(gesture_name) = crate::gesture_recognizer::recognize(&points, &templates) {
-            diag_log(format!("matcher result: recognized gesture={}", gesture_name));
+            diag_log(format!(
+                "matcher result: recognized gesture={}",
+                gesture_name
+            ));
             if let Some(action) = crate::find_action_for_gesture(config, slot, &gesture_name) {
                 let target_hwnd = GESTURE_START_WINDOW
                     .lock()
@@ -489,12 +637,13 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
                 }
 
                 let modifier_vks = active_trigger_modifier_vks(config, slot);
-                let dispatch_result = crate::command_executor::execute_action_isolated_from_modifiers(
-                    action,
-                    target_hwnd,
-                    true,
-                    &modifier_vks,
-                );
+                let dispatch_result =
+                    crate::command_executor::execute_action_isolated_from_modifiers(
+                        action,
+                        target_hwnd,
+                        true,
+                        &modifier_vks,
+                    );
                 diag_log(format!(
                     "action-dispatch result: action={} ok={}",
                     action.name,
@@ -502,7 +651,10 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
                 ));
                 crate::emit_gesture_recognized(&gesture_name, Some(&action.action_type));
             } else {
-                diag_log(format!("action-dispatch result: no action mapped for slot={} gesture={}", slot, gesture_name));
+                diag_log(format!(
+                    "action-dispatch result: no action mapped for slot={} gesture={}",
+                    slot, gesture_name
+                ));
             }
         } else if let Some(mouse_pos) = should_replay_right_click(config, slot, &points) {
             diag_log(format!(
@@ -522,6 +674,30 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
     TRAJECTORY.lock().unwrap().clear();
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
     *GESTURE_START_WINDOW.lock().unwrap() = None;
+    KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
+}
+
+/// 設定変更・無効化・フック再初期化では、保留中を含むキーボードセッションを実行せず破棄する。
+pub fn cancel_keyboard_gesture_session() {
+    KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
+    let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
+    let config = ACTIVE_CONFIG.lock().unwrap().clone();
+    let is_keyboard_session =
+        active_slot
+            .as_deref()
+            .zip(config.as_ref())
+            .is_some_and(|(slot, config)| {
+                crate::config::parse_keyboard_trigger(crate::trigger_button_for_slot(config, slot))
+                    .is_some()
+            });
+    if is_keyboard_session {
+        *IS_DRAGGING.lock().unwrap() = false;
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *GESTURE_START_WINDOW.lock().unwrap() = None;
+        TRAJECTORY.lock().unwrap().clear();
+        clear_preview_state();
+        crate::emit_trajectory_update(&[], false);
+    }
 }
 
 unsafe extern "system" fn mouse_hook_proc(
@@ -546,7 +722,10 @@ unsafe extern "system" fn mouse_hook_proc(
             | WM_XBUTTONUP
     );
     if is_down_up_event {
-        diag_log(format!("callback entered nCode={} msg={}", n_code, event_type));
+        diag_log(format!(
+            "callback entered nCode={} msg={}",
+            n_code, event_type
+        ));
     }
 
     let mouse_data = *(l_param.0 as *const MSLLHOOKSTRUCT);
@@ -569,13 +748,19 @@ unsafe extern "system" fn mouse_hook_proc(
                 ));
                 if let Some(slot) = trigger_slot_for_mouse_down(&config, event_type, &mouse_data) {
                     diag_log(format!("trigger match: slot={}", slot));
-                    let point = POINT { x: mouse_data.pt.x, y: mouse_data.pt.y };
+                    let point = POINT {
+                        x: mouse_data.pt.x,
+                        y: mouse_data.pt.y,
+                    };
                     let current_window = resolve_window_for_point(point);
 
                     if current_window != HWND::default() {
                         if let Some(exe_name) = get_window_exe_name(current_window) {
                             if is_ignored_by_global_config(&exe_name) {
-                                diag_log(format!("event ignored: exe={} in ignore_exe list", exe_name));
+                                diag_log(format!(
+                                    "event ignored: exe={} in ignore_exe list",
+                                    exe_name
+                                ));
                                 return CallNextHookEx(None, n_code, w_param, l_param);
                             }
                         }
@@ -592,7 +777,10 @@ unsafe extern "system" fn mouse_hook_proc(
         }
         WM_MOUSEMOVE => {
             if *IS_DRAGGING.lock().unwrap() {
-                TRAJECTORY.lock().unwrap().push((mouse_data.pt.x, mouse_data.pt.y));
+                TRAJECTORY
+                    .lock()
+                    .unwrap()
+                    .push((mouse_data.pt.x, mouse_data.pt.y));
                 crate::append_trajectory_point(mouse_data.pt.x, mouse_data.pt.y);
                 update_recognition_preview(false);
                 if diag_should_log_move() {
@@ -623,7 +811,11 @@ unsafe extern "system" fn mouse_hook_proc(
                 // ホイール方向のみで解決する。左クリックの押下状態には一切
                 // 依存しない（旧 leftclick_wheel_* モデルは廃止済み）。
                 let wheel_delta = ((mouse_data.mouseData >> 16) & 0xFFFF) as i16;
-                let wheel_direction = if wheel_delta > 0 { "wheel_up" } else { "wheel_down" };
+                let wheel_direction = if wheel_delta > 0 {
+                    "wheel_up"
+                } else {
+                    "wheel_down"
+                };
                 let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
 
                 if let (Some(config), Some(slot)) =
@@ -633,15 +825,21 @@ unsafe extern "system" fn mouse_hook_proc(
                         "wheel event: slot={} direction={}",
                         slot, wheel_direction
                     ));
-                    if let Some(action) = crate::find_action_for_wheel(&config, &slot, wheel_direction) {
-                        let target_hwnd = GESTURE_START_WINDOW.lock().unwrap().map(|h| HWND(h as *mut _));
+                    if let Some(action) =
+                        crate::find_action_for_wheel(&config, &slot, wheel_direction)
+                    {
+                        let target_hwnd = GESTURE_START_WINDOW
+                            .lock()
+                            .unwrap()
+                            .map(|h| HWND(h as *mut _));
                         let modifier_vks = active_trigger_modifier_vks(&config, &slot);
-                        let dispatch_result = crate::command_executor::execute_action_isolated_from_modifiers(
-                            action,
-                            target_hwnd,
-                            false,
-                            &modifier_vks,
-                        );
+                        let dispatch_result =
+                            crate::command_executor::execute_action_isolated_from_modifiers(
+                                action,
+                                target_hwnd,
+                                false,
+                                &modifier_vks,
+                            );
                         diag_log(format!(
                             "wheel-action-dispatch result: action={} ok={}",
                             action.name,
@@ -652,7 +850,9 @@ unsafe extern "system" fn mouse_hook_proc(
                         // 単体のホイールアクションとして扱う。
                         TRAJECTORY.lock().unwrap().clear();
                     } else {
-                        diag_log("wheel-action-dispatch result: no action mapped for slot/direction");
+                        diag_log(
+                            "wheel-action-dispatch result: no action mapped for slot/direction",
+                        );
                     }
                 }
 
@@ -698,14 +898,27 @@ unsafe extern "system" fn keyboard_hook_proc(
                 vk_code,
                 event_type == WM_SYSKEYDOWN,
                 pressed_snapshot,
-                effective_keys.difference(&pressed_snapshot).collect::<Vec<_>>()
+                effective_keys
+                    .difference(&pressed_snapshot)
+                    .collect::<Vec<_>>()
             ));
 
-            if !*IS_DRAGGING.lock().unwrap() {
-                load_active_resources();
-                let config = ACTIVE_CONFIG.lock().unwrap().clone();
-                if let Some(config) = config {
-                    if let Some(slot) = trigger_slot_for_keyboard_down(&config, vk_code, &effective_keys) {
+            load_active_resources();
+            let config = ACTIVE_CONFIG.lock().unwrap().clone();
+            if let Some(config) = config {
+                let dedicated_slot = dedicated_keyboard_slot_for_vk(&config, vk_code);
+                if KEYBOARD_RELEASE_STATE.lock().unwrap().resume(vk_code) {
+                    diag_log(format!(
+                        "keyboard release chatter absorbed: key={:#04x}",
+                        vk_code
+                    ));
+                    return LRESULT(1);
+                }
+
+                if !*IS_DRAGGING.lock().unwrap() {
+                    if let Some(slot) =
+                        trigger_slot_for_keyboard_down(&config, vk_code, &effective_keys)
+                    {
                         diag_log(format!("keyboard trigger match: slot={}", slot));
                         let point = current_cursor_point();
                         let current_window = resolve_window_for_point(point);
@@ -713,16 +926,28 @@ unsafe extern "system" fn keyboard_hook_proc(
                         if current_window != HWND::default() {
                             if let Some(exe_name) = get_window_exe_name(current_window) {
                                 if is_ignored_by_global_config(&exe_name) {
-                                    diag_log(format!("event ignored: exe={} in ignore_exe list", exe_name));
+                                    diag_log(format!(
+                                        "event ignored: exe={} in ignore_exe list",
+                                        exe_name
+                                    ));
                                     return CallNextHookEx(None, n_code, w_param, l_param);
                                 }
                             }
                         }
 
                         begin_gesture(&config, slot, point, current_window);
+                        if dedicated_slot == Some(slot) {
+                            KEYBOARD_RELEASE_STATE.lock().unwrap().begin(vk_code);
+                        }
                     } else {
                         diag_log("keyboard trigger match: none");
                     }
+                }
+
+                // A configured single key is an OpenMouseGesture-dedicated key:
+                // consume initial and auto-repeat down events before Windows sees them.
+                if dedicated_slot.is_some() {
+                    return LRESULT(1);
                 }
             }
         }
@@ -741,16 +966,44 @@ unsafe extern "system" fn keyboard_hook_proc(
                 pressed_snapshot
             ));
 
-            if *IS_DRAGGING.lock().unwrap() {
-                let config = ACTIVE_CONFIG.lock().unwrap().clone();
-                let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
-                if let (Some(config), Some(slot)) = (config, active_slot) {
-                    let trigger = crate::trigger_button_for_slot(&config, &slot);
-                    if crate::config::parse_keyboard_trigger(trigger).is_some()
-                        && !keyboard_trigger_active(trigger, &effective_keys)
+            load_active_resources();
+            let config = ACTIVE_CONFIG.lock().unwrap().clone();
+            if let Some(config) = config {
+                if let Some(slot) = dedicated_keyboard_slot_for_vk(&config, vk_code) {
+                    if *IS_DRAGGING.lock().unwrap()
+                        && ACTIVE_TRIGGER_SLOT.lock().unwrap().as_deref() == Some(slot)
                     {
-                        diag_log(format!("keyboard trigger released: slot={}", slot));
-                        complete_gesture(&config, &slot);
+                        if let Some(generation) = KEYBOARD_RELEASE_STATE
+                            .lock()
+                            .unwrap()
+                            .enter_release_pending(vk_code)
+                        {
+                            diag_log(format!(
+                                "keyboard trigger release pending: slot={} key={:#04x}",
+                                slot, vk_code
+                            ));
+                            schedule_confirmed_keyboard_release(
+                                config.clone(),
+                                slot.to_string(),
+                                vk_code,
+                                generation,
+                            );
+                        }
+                    }
+                    // Consume the dedicated keyup even for a tap/no-recognition.
+                    return LRESULT(1);
+                }
+
+                if *IS_DRAGGING.lock().unwrap() {
+                    let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
+                    if let Some(slot) = active_slot {
+                        let trigger = crate::trigger_button_for_slot(&config, &slot);
+                        if crate::config::parse_keyboard_trigger(trigger).is_some()
+                            && !keyboard_trigger_active(trigger, &effective_keys)
+                        {
+                            diag_log(format!("keyboard trigger released: slot={}", slot));
+                            complete_gesture(&config, &slot);
+                        }
                     }
                 }
             }
@@ -795,6 +1048,7 @@ pub fn uninstall_hook() -> Result<()> {
     // これがないと、ジェスチャー中に無効化/終了した場合に次回フック導入時
     // 古い状態（掴みっぱなしのボタン等）が残ってしまう。
     PRESSED_KEYS.lock().unwrap().clear();
+    KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
     *IS_DRAGGING.lock().unwrap() = false;
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
     *GESTURE_START_WINDOW.lock().unwrap() = None;
@@ -861,14 +1115,22 @@ mod tests {
         // so normal left-click interaction always keeps working.
         let config = config_with_triggers("mouse:left", "mouse:middle", "mouse:x1");
         let empty_data = mouse_data_for_xbutton(0);
-        assert_eq!(trigger_slot_for_mouse_down(&config, WM_LBUTTONDOWN, &empty_data), None);
+        assert_eq!(
+            trigger_slot_for_mouse_down(&config, WM_LBUTTONDOWN, &empty_data),
+            None
+        );
     }
 
     #[test]
     fn active_mouse_trigger_matches_up_never_matches_left_button() {
         let config = config_with_triggers("mouse:left", "mouse:middle", "mouse:x1");
         let empty_data = mouse_data_for_xbutton(0);
-        assert!(!active_mouse_trigger_matches_up(&config, "A", WM_LBUTTONUP, &empty_data));
+        assert!(!active_mouse_trigger_matches_up(
+            &config,
+            "A",
+            WM_LBUTTONUP,
+            &empty_data
+        ));
     }
 
     #[test]
@@ -893,7 +1155,10 @@ mod tests {
 
         // x2 down data must not match a slot configured for x1.
         let x2_data = mouse_data_for_xbutton(2);
-        assert_eq!(trigger_slot_for_mouse_down(&config, WM_XBUTTONDOWN, &x2_data), None);
+        assert_eq!(
+            trigger_slot_for_mouse_down(&config, WM_XBUTTONDOWN, &x2_data),
+            None
+        );
     }
 
     #[test]
@@ -902,8 +1167,14 @@ mod tests {
         // where a slot was reassigned to a keyboard trigger).
         let config = config_with_triggers("key:Shift+F1", "mouse:right", "mouse:x1");
         let empty_data = mouse_data_for_xbutton(0);
-        assert_eq!(trigger_slot_for_mouse_down(&config, WM_MBUTTONDOWN, &empty_data), None);
-        assert_eq!(trigger_slot_for_mouse_down(&config, WM_RBUTTONDOWN, &empty_data), Some("B"));
+        assert_eq!(
+            trigger_slot_for_mouse_down(&config, WM_MBUTTONDOWN, &empty_data),
+            None
+        );
+        assert_eq!(
+            trigger_slot_for_mouse_down(&config, WM_RBUTTONDOWN, &empty_data),
+            Some("B")
+        );
     }
 
     #[test]
@@ -912,10 +1183,30 @@ mod tests {
         let empty_data = mouse_data_for_xbutton(0);
         let x1_data = mouse_data_for_xbutton(1);
 
-        assert!(active_mouse_trigger_matches_up(&config, "A", WM_RBUTTONUP, &empty_data));
-        assert!(active_mouse_trigger_matches_up(&config, "B", WM_MBUTTONUP, &empty_data));
-        assert!(active_mouse_trigger_matches_up(&config, "C", WM_XBUTTONUP, &x1_data));
-        assert!(!active_mouse_trigger_matches_up(&config, "A", WM_MBUTTONUP, &empty_data));
+        assert!(active_mouse_trigger_matches_up(
+            &config,
+            "A",
+            WM_RBUTTONUP,
+            &empty_data
+        ));
+        assert!(active_mouse_trigger_matches_up(
+            &config,
+            "B",
+            WM_MBUTTONUP,
+            &empty_data
+        ));
+        assert!(active_mouse_trigger_matches_up(
+            &config,
+            "C",
+            WM_XBUTTONUP,
+            &x1_data
+        ));
+        assert!(!active_mouse_trigger_matches_up(
+            &config,
+            "A",
+            WM_MBUTTONUP,
+            &empty_data
+        ));
     }
 
     #[test]
@@ -1029,6 +1320,46 @@ mod tests {
     const VK_F2: u16 = 0x71;
     const VK_F3: u16 = 0x72;
     const VK_Z: u16 = 0x5A;
+    const VK_CAPITAL: u16 = 0x14;
+
+    #[test]
+    fn dedicated_keyboard_trigger_selects_only_single_key_bindings() {
+        let config = config_with_triggers("key:CapsLock", "key:Shift+F1", "mouse:x1");
+        assert_eq!(
+            dedicated_keyboard_slot_for_vk(&config, VK_CAPITAL),
+            Some("A")
+        );
+        assert_eq!(dedicated_keyboard_slot_for_vk(&config, VK_F1), None);
+        assert_eq!(dedicated_keyboard_slot_for_vk(&config, VK_F2), None);
+    }
+
+    #[test]
+    fn release_pending_state_absorbs_chatter_and_finalizes_once() {
+        let mut state = KeyboardReleaseState::new();
+        state.begin(VK_Z);
+        let first_generation = state
+            .enter_release_pending(VK_Z)
+            .expect("first keyup enters pending");
+        assert!(state.resume(VK_Z));
+        assert!(!state.take_confirmed_release(VK_Z, first_generation));
+
+        let confirmed_generation = state
+            .enter_release_pending(VK_Z)
+            .expect("second keyup enters pending");
+        assert!(state.take_confirmed_release(VK_Z, confirmed_generation));
+        assert!(!state.take_confirmed_release(VK_Z, confirmed_generation));
+    }
+
+    #[test]
+    fn release_pending_state_ignores_duplicate_keyup_and_wrong_key() {
+        let mut state = KeyboardReleaseState::new();
+        state.begin(VK_Z);
+        assert!(state.enter_release_pending(VK_F1).is_none());
+        assert!(state.enter_release_pending(VK_Z).is_some());
+        assert!(state.enter_release_pending(VK_Z).is_none());
+        state.clear();
+        assert!(!state.resume(VK_Z));
+    }
 
     #[test]
     fn modifier_pressed_matches_generic_and_left_right_specific_vk_codes() {
@@ -1055,11 +1386,19 @@ mod tests {
     fn keyboard_trigger_starts_on_vk_requires_modifier_and_final_key_together() {
         // Shift alone (only the modifier held) must never start the gesture.
         let shift_only = HashSet::from([VK_LSHIFT]);
-        assert!(!keyboard_trigger_starts_on_vk("key:Shift+F1", VK_LSHIFT, &shift_only));
+        assert!(!keyboard_trigger_starts_on_vk(
+            "key:Shift+F1",
+            VK_LSHIFT,
+            &shift_only
+        ));
 
         // The final key going down while Shift is held (any Shift VK
         // convention) must start it, for F1, F2, and F3 independently.
-        for (trigger, vk) in [("key:Shift+F1", VK_F1), ("key:Shift+F2", VK_F2), ("key:Shift+F3", VK_F3)] {
+        for (trigger, vk) in [
+            ("key:Shift+F1", VK_F1),
+            ("key:Shift+F2", VK_F2),
+            ("key:Shift+F3", VK_F3),
+        ] {
             let keys = HashSet::from([VK_LSHIFT, vk]);
             assert!(
                 keyboard_trigger_starts_on_vk(trigger, vk, &keys),
@@ -1072,13 +1411,21 @@ mod tests {
         // Wrong final key (F2 down) must not match a Shift+F1 trigger even
         // though Shift is held.
         let wrong_key = HashSet::from([VK_LSHIFT, VK_F2]);
-        assert!(!keyboard_trigger_starts_on_vk("key:Shift+F1", VK_F2, &wrong_key));
+        assert!(!keyboard_trigger_starts_on_vk(
+            "key:Shift+F1",
+            VK_F2,
+            &wrong_key
+        ));
     }
 
     #[test]
     fn keyboard_trigger_starts_on_vk_supports_ctrl_and_alt_combinations() {
         let ctrl_f2 = HashSet::from([VK_LCONTROL, VK_F2]);
-        assert!(keyboard_trigger_starts_on_vk("key:Ctrl+F2", VK_F2, &ctrl_f2));
+        assert!(keyboard_trigger_starts_on_vk(
+            "key:Ctrl+F2",
+            VK_F2,
+            &ctrl_f2
+        ));
 
         let alt_f3 = HashSet::from([VK_LMENU, VK_F3]);
         assert!(keyboard_trigger_starts_on_vk("key:Alt+F3", VK_F3, &alt_f3));
@@ -1089,7 +1436,11 @@ mod tests {
         // A plain single-key trigger (e.g. "Z") must start regardless of
         // whether unrelated modifiers happen to be held, mirroring the
         // reported working behavior of single-key triggers.
-        assert!(keyboard_trigger_starts_on_vk("key:KeyZ", VK_Z, &HashSet::from([VK_Z])));
+        assert!(keyboard_trigger_starts_on_vk(
+            "key:KeyZ",
+            VK_Z,
+            &HashSet::from([VK_Z])
+        ));
         assert!(keyboard_trigger_starts_on_vk(
             "key:KeyZ",
             VK_Z,
@@ -1102,10 +1453,16 @@ mod tests {
         let trigger = "key:Shift+F1";
 
         // Both held: still active.
-        assert!(keyboard_trigger_active(trigger, &HashSet::from([VK_LSHIFT, VK_F1])));
+        assert!(keyboard_trigger_active(
+            trigger,
+            &HashSet::from([VK_LSHIFT, VK_F1])
+        ));
 
         // F1 released first: no longer active.
-        assert!(!keyboard_trigger_active(trigger, &HashSet::from([VK_LSHIFT])));
+        assert!(!keyboard_trigger_active(
+            trigger,
+            &HashSet::from([VK_LSHIFT])
+        ));
 
         // Shift released first (F1 still down): no longer active.
         assert!(!keyboard_trigger_active(trigger, &HashSet::from([VK_F1])));
@@ -1201,7 +1558,10 @@ mod tests {
             Some(VK_SHIFT)
         );
         assert_eq!(modifier_vk_from_live_keys("Shift", &HashSet::new()), None);
-        assert_eq!(modifier_vk_from_live_keys("NotAModifier", &HashSet::from([VK_LSHIFT])), None);
+        assert_eq!(
+            modifier_vk_from_live_keys("NotAModifier", &HashSet::from([VK_LSHIFT])),
+            None
+        );
     }
 
     #[test]
@@ -1211,7 +1571,10 @@ mod tests {
             vec![VK_LSHIFT]
         );
         assert_eq!(
-            trigger_modifier_vks_from_live_keys("key:Ctrl+F1", &HashSet::from([VK_LCONTROL, VK_F1])),
+            trigger_modifier_vks_from_live_keys(
+                "key:Ctrl+F1",
+                &HashSet::from([VK_LCONTROL, VK_F1])
+            ),
             vec![VK_LCONTROL]
         );
         assert_eq!(
@@ -1225,14 +1588,19 @@ mod tests {
         // Single-key triggers (e.g. "Z") and mouse triggers must never have any
         // modifier isolated/restored around them; there is nothing to contaminate.
         assert!(trigger_modifier_vks_from_live_keys("key:KeyZ", &HashSet::from([VK_Z])).is_empty());
-        assert!(trigger_modifier_vks_from_live_keys("mouse:right", &HashSet::from([VK_LSHIFT])).is_empty());
+        assert!(
+            trigger_modifier_vks_from_live_keys("mouse:right", &HashSet::from([VK_LSHIFT]))
+                .is_empty()
+        );
     }
 
     #[test]
     fn trigger_modifier_vks_from_live_keys_only_returns_modifiers_actually_held_live() {
         // The trigger requires Shift, but Shift is not currently held live (e.g. it
         // was already released) -- nothing should be isolated in that case.
-        assert!(trigger_modifier_vks_from_live_keys("key:Shift+F1", &HashSet::from([VK_F1])).is_empty());
+        assert!(
+            trigger_modifier_vks_from_live_keys("key:Shift+F1", &HashSet::from([VK_F1])).is_empty()
+        );
     }
 
     #[test]

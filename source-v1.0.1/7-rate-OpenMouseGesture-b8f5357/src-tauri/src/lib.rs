@@ -375,6 +375,7 @@ fn get_config() -> Result<Config, String> {
 #[tauri::command]
 fn save_config(config: Config) -> Result<(), String> {
     let manager = ConfigManager::new()?;
+    mouse_hook::cancel_keyboard_gesture_session();
     set_trajectory_enabled_internal(config.trajectory);
     manager.save_config(&config)
 }
@@ -455,6 +456,9 @@ fn delete_action(actionKey: String) -> Result<(), String> {
 fn set_gesture_enabled(enabled: bool) {
     let mut gesture_enabled = GESTURE_ENABLED.lock().unwrap();
     *gesture_enabled = enabled;
+    if !enabled {
+        mouse_hook::cancel_keyboard_gesture_session();
+    }
 }
 
 #[tauri::command]
@@ -595,10 +599,17 @@ fn toggle_gesture_enabled(_app: &AppHandle) {
 
     if new_state {
         let result = mouse_hook::install_hook();
-        eprintln!("[tray] gesture toggle -> enabled, hook install result: {:?}", result.is_ok());
+        eprintln!(
+            "[tray] gesture toggle -> enabled, hook install result: {:?}",
+            result.is_ok()
+        );
     } else {
+        mouse_hook::cancel_keyboard_gesture_session();
         let result = mouse_hook::uninstall_hook();
-        eprintln!("[tray] gesture toggle -> disabled, hook uninstall result: {:?}", result.is_ok());
+        eprintln!(
+            "[tray] gesture toggle -> disabled, hook uninstall result: {:?}",
+            result.is_ok()
+        );
     }
 
     update_tray_icon(new_state);
@@ -923,12 +934,10 @@ mod tests {
     #[test]
     fn find_action_for_wheel_first_match_wins_on_duplicate_slot_direction() {
         let mut config = Config::default();
-        config.actions = vec![
-            wheel_action("A", "wheel_up"),
-            wheel_action("A", "wheel_up"),
-        ];
+        config.actions = vec![wheel_action("A", "wheel_up"), wheel_action("A", "wheel_up")];
 
-        let found = find_action_for_wheel(&config, "A", "wheel_up").expect("should find first match");
+        let found =
+            find_action_for_wheel(&config, "A", "wheel_up").expect("should find first match");
         assert_eq!(found as *const _, &config.actions[0] as *const _);
     }
 }
