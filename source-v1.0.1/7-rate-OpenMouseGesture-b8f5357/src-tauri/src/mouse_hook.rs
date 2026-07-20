@@ -3,7 +3,8 @@ use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use windows::{
-    core::*, Win32::Foundation::*, Win32::System::Threading::*, Win32::UI::WindowsAndMessaging::*,
+    core::*, Win32::Foundation::*, Win32::System::Threading::*,
+    Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState, Win32::UI::WindowsAndMessaging::*,
 };
 
 const LLMHF_INJECTED: u32 = 0x00000001;
@@ -78,7 +79,6 @@ static MOUSE_HOOK_HANDLE: Mutex<Option<isize>> = Mutex::new(None);
 static KEYBOARD_HOOK_HANDLE: Mutex<Option<isize>> = Mutex::new(None);
 static TRAJECTORY: Mutex<Vec<(i32, i32)>> = Mutex::new(Vec::new());
 static IS_DRAGGING: Mutex<bool> = Mutex::new(false);
-static IS_LEFT_PRESSED: Mutex<bool> = Mutex::new(false);
 static GESTURE_START_WINDOW: Mutex<Option<isize>> = Mutex::new(None);
 static ACTIVE_TEMPLATES: Mutex<Vec<crate::config::GestureTemplate>> = Mutex::new(Vec::new());
 static ACTIVE_CONFIG: Mutex<Option<crate::config::Config>> = Mutex::new(None);
@@ -239,6 +239,8 @@ fn xbutton_name(mouse_data: &MSLLHOOKSTRUCT) -> Option<&'static str> {
     }
 }
 
+const MODIFIER_VK_CODES: [u16; 9] = [0x10, 0xA0, 0xA1, 0x11, 0xA2, 0xA3, 0x12, 0xA4, 0xA5];
+
 fn modifier_pressed(keys: &HashSet<u16>, modifier: &str) -> bool {
     match modifier {
         "Shift" => [0x10, 0xA0, 0xA1].iter().any(|code| keys.contains(code)),
@@ -246,6 +248,31 @@ fn modifier_pressed(keys: &HashSet<u16>, modifier: &str) -> bool {
         "Alt" => [0x12, 0xA4, 0xA5].iter().any(|code| keys.contains(code)),
         _ => false,
     }
+}
+
+/// WH_KEYBOARD_LL は down/up イベントを取りこぼす可能性がある
+/// （フォーカス切り替え、UAC昇格、フック再インストール、アプリ起動前から
+/// 押されていた等）。それだけに頼ると Shift/Ctrl/Alt の内部状態が実際の
+/// 物理キー状態とずれ、修飾キー付きトリガー（例: Shift+F1）だけが
+/// 単一キートリガーより不安定に見える原因になる。判定の直前に
+/// `GetAsyncKeyState` で実際の修飾キー状態を問い合わせ、内部トラッキング
+/// 状態とマージすることで、取りこぼしがあっても修飾キー判定は常に実際の
+/// 物理状態を反映する。
+fn live_modifier_vks() -> HashSet<u16> {
+    let mut live = HashSet::new();
+    for vk in MODIFIER_VK_CODES {
+        let state = unsafe { GetAsyncKeyState(vk as i32) };
+        if (state as u16 & 0x8000) != 0 {
+            live.insert(vk);
+        }
+    }
+    live
+}
+
+fn keys_with_live_modifiers(keys: &HashSet<u16>) -> HashSet<u16> {
+    let mut merged = keys.clone();
+    merged.extend(live_modifier_vks());
+    merged
 }
 
 fn keyboard_trigger_active(trigger: &str, keys: &HashSet<u16>) -> bool {
@@ -488,16 +515,6 @@ unsafe extern "system" fn mouse_hook_proc(
     }
 
     match event_type {
-        WM_LBUTTONDOWN => {
-            *IS_LEFT_PRESSED.lock().unwrap() = true;
-        }
-        WM_LBUTTONUP => {
-            *IS_LEFT_PRESSED.lock().unwrap() = false;
-        }
-        _ => {}
-    }
-
-    match event_type {
         WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN | WM_XBUTTONDOWN => {
             load_active_resources();
             let config = ACTIVE_CONFIG.lock().unwrap().clone();
@@ -559,23 +576,35 @@ unsafe extern "system" fn mouse_hook_proc(
         }
         WM_MOUSEWHEEL => {
             if *IS_DRAGGING.lock().unwrap() {
-                let is_left_pressed = *IS_LEFT_PRESSED.lock().unwrap();
+                // ホイールアクションはアクティブな Trigger スロット（A/B/C）と
+                // ホイール方向のみで解決する。左クリックの押下状態には一切
+                // 依存しない（旧 leftclick_wheel_* モデルは廃止済み）。
                 let wheel_delta = ((mouse_data.mouseData >> 16) & 0xFFFF) as i16;
-                let wheel_direction = if wheel_delta > 0 { "up" } else { "down" };
-                let wheel_trigger = if is_left_pressed {
-                    format!("leftclick_wheel_{}", wheel_direction)
-                } else {
-                    format!("wheel_{}", wheel_direction)
-                };
+                let wheel_direction = if wheel_delta > 0 { "wheel_up" } else { "wheel_down" };
+                let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
 
-                if let Some(config) = ACTIVE_CONFIG.lock().unwrap().clone() {
-                    if let Some(action) = config.actions.iter().find(|a| {
-                        a.trigger_type == "wheel"
-                            && a.wheel_trigger.as_ref().map_or(false, |wt| wt == &wheel_trigger)
-                    }) {
+                if let (Some(config), Some(slot)) =
+                    (ACTIVE_CONFIG.lock().unwrap().clone(), active_slot)
+                {
+                    diag_log(format!(
+                        "wheel event: slot={} direction={}",
+                        slot, wheel_direction
+                    ));
+                    if let Some(action) = crate::find_action_for_wheel(&config, &slot, wheel_direction) {
                         let target_hwnd = GESTURE_START_WINDOW.lock().unwrap().map(|h| HWND(h as *mut _));
-                        let _ = crate::command_executor::execute_action_with_window(action, target_hwnd, false);
+                        let dispatch_result =
+                            crate::command_executor::execute_action_with_window(action, target_hwnd, false);
+                        diag_log(format!(
+                            "wheel-action-dispatch result: action={} ok={}",
+                            action.name,
+                            dispatch_result.is_ok()
+                        ));
+                        // 個々のホイールティックはジェスチャー軌跡として蓄積しない。
+                        // トリガーが押されたままの連続ティックは、都度そのティック
+                        // 単体のホイールアクションとして扱う。
                         TRAJECTORY.lock().unwrap().clear();
+                    } else {
+                        diag_log("wheel-action-dispatch result: no action mapped for slot/direction");
                     }
                 }
 
@@ -612,24 +641,39 @@ unsafe extern "system" fn keyboard_hook_proc(
                 pressed_keys.insert(vk_code);
                 pressed_keys.clone()
             };
+            // 内部トラッキングだけに頼らず、実際のOS修飾キー状態も合成する
+            // （取りこぼしたdown/upイベントによる修飾キー判定のずれを防ぐ）。
+            let effective_keys = keys_with_live_modifiers(&pressed_snapshot);
+
+            diag_log(format!(
+                "keydown vk={:#04x} sys={} pressed={:?} live_modifiers={:?}",
+                vk_code,
+                event_type == WM_SYSKEYDOWN,
+                pressed_snapshot,
+                effective_keys.difference(&pressed_snapshot).collect::<Vec<_>>()
+            ));
 
             if !*IS_DRAGGING.lock().unwrap() {
                 load_active_resources();
                 let config = ACTIVE_CONFIG.lock().unwrap().clone();
                 if let Some(config) = config {
-                    if let Some(slot) = trigger_slot_for_keyboard_down(&config, vk_code, &pressed_snapshot) {
+                    if let Some(slot) = trigger_slot_for_keyboard_down(&config, vk_code, &effective_keys) {
+                        diag_log(format!("keyboard trigger match: slot={}", slot));
                         let point = current_cursor_point();
                         let current_window = resolve_window_for_point(point);
 
                         if current_window != HWND::default() {
                             if let Some(exe_name) = get_window_exe_name(current_window) {
                                 if is_ignored_by_global_config(&exe_name) {
+                                    diag_log(format!("event ignored: exe={} in ignore_exe list", exe_name));
                                     return CallNextHookEx(None, n_code, w_param, l_param);
                                 }
                             }
                         }
 
                         begin_gesture(&config, slot, point, current_window);
+                    } else {
+                        diag_log("keyboard trigger match: none");
                     }
                 }
             }
@@ -640,6 +684,14 @@ unsafe extern "system" fn keyboard_hook_proc(
                 pressed_keys.remove(&vk_code);
                 pressed_keys.clone()
             };
+            let effective_keys = keys_with_live_modifiers(&pressed_snapshot);
+
+            diag_log(format!(
+                "keyup vk={:#04x} sys={} pressed={:?}",
+                vk_code,
+                event_type == WM_SYSKEYUP,
+                pressed_snapshot
+            ));
 
             if *IS_DRAGGING.lock().unwrap() {
                 let config = ACTIVE_CONFIG.lock().unwrap().clone();
@@ -647,8 +699,9 @@ unsafe extern "system" fn keyboard_hook_proc(
                 if let (Some(config), Some(slot)) = (config, active_slot) {
                     let trigger = crate::trigger_button_for_slot(&config, &slot);
                     if crate::config::parse_keyboard_trigger(trigger).is_some()
-                        && !keyboard_trigger_active(trigger, &pressed_snapshot)
+                        && !keyboard_trigger_active(trigger, &effective_keys)
                     {
+                        diag_log(format!("keyboard trigger released: slot={}", slot));
                         complete_gesture(&config, &slot);
                     }
                 }
@@ -695,7 +748,6 @@ pub fn uninstall_hook() -> Result<()> {
     // 古い状態（掴みっぱなしのボタン等）が残ってしまう。
     PRESSED_KEYS.lock().unwrap().clear();
     *IS_DRAGGING.lock().unwrap() = false;
-    *IS_LEFT_PRESSED.lock().unwrap() = false;
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
     *GESTURE_START_WINDOW.lock().unwrap() = None;
     TRAJECTORY.lock().unwrap().clear();
@@ -898,7 +950,6 @@ mod tests {
         let _guard = STATE_TEST_LOCK.lock().unwrap();
 
         *IS_DRAGGING.lock().unwrap() = true;
-        *IS_LEFT_PRESSED.lock().unwrap() = true;
         *ACTIVE_TRIGGER_SLOT.lock().unwrap() = Some("A".to_string());
         *GESTURE_START_WINDOW.lock().unwrap() = Some(1);
         TRAJECTORY.lock().unwrap().push((1, 2));
@@ -907,11 +958,164 @@ mod tests {
         uninstall_hook().unwrap();
 
         assert!(!*IS_DRAGGING.lock().unwrap());
-        assert!(!*IS_LEFT_PRESSED.lock().unwrap());
         assert!(ACTIVE_TRIGGER_SLOT.lock().unwrap().is_none());
         assert!(GESTURE_START_WINDOW.lock().unwrap().is_none());
         assert!(TRAJECTORY.lock().unwrap().is_empty());
         assert!(PRESSED_KEYS.lock().unwrap().is_empty());
+    }
+
+    // --- Modifier keyboard trigger reliability (Shift/Ctrl/Alt + F1-F3 etc.) ---
+    //
+    // WH_KEYBOARD_LL reports the *specific* left/right virtual key for
+    // modifiers (VK_LSHIFT/VK_RSHIFT etc.), not just the generic VK_SHIFT.
+    // modifier_pressed must recognize both the generic and the left/right
+    // specific codes so that neither convention silently fails to match.
+    const VK_SHIFT: u16 = 0x10;
+    const VK_LSHIFT: u16 = 0xA0;
+    const VK_RSHIFT: u16 = 0xA1;
+    const VK_CONTROL: u16 = 0x11;
+    const VK_LCONTROL: u16 = 0xA2;
+    const VK_MENU: u16 = 0x12; // Alt
+    const VK_LMENU: u16 = 0xA4;
+    const VK_F1: u16 = 0x70;
+    const VK_F2: u16 = 0x71;
+    const VK_F3: u16 = 0x72;
+    const VK_Z: u16 = 0x5A;
+
+    #[test]
+    fn modifier_pressed_matches_generic_and_left_right_specific_vk_codes() {
+        assert!(modifier_pressed(&HashSet::from([VK_SHIFT]), "Shift"));
+        assert!(modifier_pressed(&HashSet::from([VK_LSHIFT]), "Shift"));
+        assert!(modifier_pressed(&HashSet::from([VK_RSHIFT]), "Shift"));
+        assert!(!modifier_pressed(&HashSet::from([VK_CONTROL]), "Shift"));
+
+        assert!(modifier_pressed(&HashSet::from([VK_CONTROL]), "Ctrl"));
+        assert!(modifier_pressed(&HashSet::from([VK_LCONTROL]), "Ctrl"));
+
+        assert!(modifier_pressed(&HashSet::from([VK_MENU]), "Alt"));
+        assert!(modifier_pressed(&HashSet::from([VK_LMENU]), "Alt"));
+    }
+
+    #[test]
+    fn keyboard_code_to_vk_maps_f1_through_f3_correctly() {
+        assert_eq!(crate::config::keyboard_code_to_vk("F1"), Some(VK_F1));
+        assert_eq!(crate::config::keyboard_code_to_vk("F2"), Some(VK_F2));
+        assert_eq!(crate::config::keyboard_code_to_vk("F3"), Some(VK_F3));
+    }
+
+    #[test]
+    fn keyboard_trigger_starts_on_vk_requires_modifier_and_final_key_together() {
+        // Shift alone (only the modifier held) must never start the gesture.
+        let shift_only = HashSet::from([VK_LSHIFT]);
+        assert!(!keyboard_trigger_starts_on_vk("key:Shift+F1", VK_LSHIFT, &shift_only));
+
+        // The final key going down while Shift is held (any Shift VK
+        // convention) must start it, for F1, F2, and F3 independently.
+        for (trigger, vk) in [("key:Shift+F1", VK_F1), ("key:Shift+F2", VK_F2), ("key:Shift+F3", VK_F3)] {
+            let keys = HashSet::from([VK_LSHIFT, vk]);
+            assert!(
+                keyboard_trigger_starts_on_vk(trigger, vk, &keys),
+                "expected {} to start with keys {:?}",
+                trigger,
+                keys
+            );
+        }
+
+        // Wrong final key (F2 down) must not match a Shift+F1 trigger even
+        // though Shift is held.
+        let wrong_key = HashSet::from([VK_LSHIFT, VK_F2]);
+        assert!(!keyboard_trigger_starts_on_vk("key:Shift+F1", VK_F2, &wrong_key));
+    }
+
+    #[test]
+    fn keyboard_trigger_starts_on_vk_supports_ctrl_and_alt_combinations() {
+        let ctrl_f2 = HashSet::from([VK_LCONTROL, VK_F2]);
+        assert!(keyboard_trigger_starts_on_vk("key:Ctrl+F2", VK_F2, &ctrl_f2));
+
+        let alt_f3 = HashSet::from([VK_LMENU, VK_F3]);
+        assert!(keyboard_trigger_starts_on_vk("key:Alt+F3", VK_F3, &alt_f3));
+    }
+
+    #[test]
+    fn keyboard_trigger_starts_on_vk_single_key_trigger_ignores_modifier_state() {
+        // A plain single-key trigger (e.g. "Z") must start regardless of
+        // whether unrelated modifiers happen to be held, mirroring the
+        // reported working behavior of single-key triggers.
+        assert!(keyboard_trigger_starts_on_vk("key:KeyZ", VK_Z, &HashSet::from([VK_Z])));
+        assert!(keyboard_trigger_starts_on_vk(
+            "key:KeyZ",
+            VK_Z,
+            &HashSet::from([VK_Z, VK_LSHIFT])
+        ));
+    }
+
+    #[test]
+    fn keyboard_trigger_active_ends_when_modifier_or_key_released() {
+        let trigger = "key:Shift+F1";
+
+        // Both held: still active.
+        assert!(keyboard_trigger_active(trigger, &HashSet::from([VK_LSHIFT, VK_F1])));
+
+        // F1 released first: no longer active.
+        assert!(!keyboard_trigger_active(trigger, &HashSet::from([VK_LSHIFT])));
+
+        // Shift released first (F1 still down): no longer active.
+        assert!(!keyboard_trigger_active(trigger, &HashSet::from([VK_F1])));
+
+        // Neither held.
+        assert!(!keyboard_trigger_active(trigger, &HashSet::new()));
+    }
+
+    #[test]
+    fn trigger_slot_for_keyboard_down_resolves_independent_modifier_combinations() {
+        let config = config_with_triggers("key:Shift+F1", "key:Shift+F2", "key:Shift+F3");
+
+        assert_eq!(
+            trigger_slot_for_keyboard_down(&config, VK_F1, &HashSet::from([VK_LSHIFT, VK_F1])),
+            Some("A")
+        );
+        assert_eq!(
+            trigger_slot_for_keyboard_down(&config, VK_F2, &HashSet::from([VK_LSHIFT, VK_F2])),
+            Some("B")
+        );
+        assert_eq!(
+            trigger_slot_for_keyboard_down(&config, VK_F3, &HashSet::from([VK_LSHIFT, VK_F3])),
+            Some("C")
+        );
+
+        // Holding only Shift (no final key yet) must never resolve to a slot.
+        assert_eq!(
+            trigger_slot_for_keyboard_down(&config, VK_LSHIFT, &HashSet::from([VK_LSHIFT])),
+            None
+        );
+    }
+
+    #[test]
+    fn trigger_slot_for_keyboard_down_single_key_trigger_still_works() {
+        let config = config_with_triggers("key:KeyZ", "mouse:middle", "mouse:x1");
+        assert_eq!(
+            trigger_slot_for_keyboard_down(&config, VK_Z, &HashSet::from([VK_Z])),
+            Some("A")
+        );
+    }
+
+    #[test]
+    fn live_modifier_vks_only_contains_known_modifier_codes() {
+        // Cannot simulate physically holding a key in CI, but this proves the
+        // live-state probe is bounded to the documented modifier VK set and
+        // never panics when no modifier is physically held.
+        let live = live_modifier_vks();
+        for vk in &live {
+            assert!(MODIFIER_VK_CODES.contains(vk));
+        }
+    }
+
+    #[test]
+    fn keys_with_live_modifiers_is_a_superset_of_the_tracked_snapshot() {
+        let tracked = HashSet::from([VK_F1]);
+        let merged = keys_with_live_modifiers(&tracked);
+        assert!(merged.contains(&VK_F1));
+        assert!(tracked.is_subset(&merged));
     }
 
     #[test]

@@ -15,7 +15,7 @@ export function isWheelAction(action: Action): boolean {
 
 export function getActionKey(action: Action): string {
   if (isWheelAction(action)) {
-    return `wheel:${action.wheel_trigger ?? ""}`;
+    return `wheel:${normalizeTriggerSlot(action.trigger_slot)}:${action.wheel_trigger ?? ""}`;
   }
 
   return `gesture:${normalizeTriggerSlot(action.trigger_slot)}:${action.gesture}`;
@@ -23,7 +23,7 @@ export function getActionKey(action: Action): string {
 
 export function getActionDisplayTrigger(action: Action): string {
   if (isWheelAction(action)) {
-    return action.wheel_trigger ?? "";
+    return `Trigger ${normalizeTriggerSlot(action.trigger_slot)} / ${action.wheel_trigger ?? ""}`;
   }
 
   return `Trigger ${normalizeTriggerSlot(action.trigger_slot)}`;

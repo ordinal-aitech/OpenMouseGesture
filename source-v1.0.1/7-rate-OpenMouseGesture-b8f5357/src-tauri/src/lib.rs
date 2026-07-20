@@ -47,7 +47,8 @@ pub fn normalize_trigger_slot(slot: &str) -> &'static str {
 pub fn action_key_for_action(action: &Action) -> String {
     if action.trigger_type == "wheel" {
         return format!(
-            "wheel:{}",
+            "wheel:{}:{}",
+            normalize_trigger_slot(&action.trigger_slot),
             action.wheel_trigger.as_deref().unwrap_or_default()
         );
     }
@@ -69,6 +70,23 @@ pub fn find_action_for_gesture<'a>(
         (a.trigger_type.is_empty() || a.trigger_type == "gesture")
             && normalize_trigger_slot(&a.trigger_slot) == slot
             && a.gesture == gesture_name
+    })
+}
+
+/// トリガー中の Trigger A/B/C とホイール方向 (`wheel_up`/`wheel_down`) の
+/// 組み合わせでアクションを解決する。左クリック状態には一切依存しない。
+/// 同じスロット+方向の組み合わせが複数登録されていた場合は先頭のものを
+/// 採用する（ジェスチャーアクションの解決と同じ優先順位規則）。
+pub fn find_action_for_wheel<'a>(
+    config: &'a Config,
+    trigger_slot: &str,
+    wheel_direction: &str,
+) -> Option<&'a Action> {
+    let slot = normalize_trigger_slot(trigger_slot);
+    config.actions.iter().find(|a| {
+        a.trigger_type == "wheel"
+            && normalize_trigger_slot(&a.trigger_slot) == slot
+            && a.wheel_trigger.as_deref() == Some(wheel_direction)
     })
 }
 
@@ -771,5 +789,74 @@ mod tests {
         // Must return without touching the (unavailable in tests) native overlay window.
         show_action_label_for_action(&action);
         clear_action_label_overlay();
+    }
+
+    fn wheel_action(trigger_slot: &str, wheel_trigger: &str) -> Action {
+        Action {
+            trigger_type: "wheel".to_string(),
+            trigger_slot: trigger_slot.to_string(),
+            wheel_trigger: Some(wheel_trigger.to_string()),
+            action_type: "keystroke".to_string(),
+            keystroke: Some("PageDown".to_string()),
+            ..Action::default()
+        }
+    }
+
+    #[test]
+    fn action_key_for_action_includes_trigger_slot_for_wheel_actions() {
+        let action = wheel_action("B", "wheel_up");
+        assert_eq!(action_key_for_action(&action), "wheel:B:wheel_up");
+    }
+
+    #[test]
+    fn find_action_for_wheel_resolves_independently_per_slot_and_direction() {
+        let mut config = Config::default();
+        config.actions = vec![
+            wheel_action("A", "wheel_up"),
+            wheel_action("A", "wheel_down"),
+            wheel_action("B", "wheel_up"),
+            wheel_action("B", "wheel_down"),
+            wheel_action("C", "wheel_up"),
+            wheel_action("C", "wheel_down"),
+        ];
+
+        for (idx, (slot, direction)) in [
+            ("A", "wheel_up"),
+            ("A", "wheel_down"),
+            ("B", "wheel_up"),
+            ("B", "wheel_down"),
+            ("C", "wheel_up"),
+            ("C", "wheel_down"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let found = find_action_for_wheel(&config, slot, direction)
+                .unwrap_or_else(|| panic!("expected an action for {}+{}", slot, direction));
+            assert_eq!(found as *const _, &config.actions[idx] as *const _);
+        }
+    }
+
+    #[test]
+    fn find_action_for_wheel_does_not_cross_dispatch_between_slots() {
+        let mut config = Config::default();
+        config.actions = vec![wheel_action("A", "wheel_up")];
+
+        assert!(find_action_for_wheel(&config, "B", "wheel_up").is_none());
+        assert!(find_action_for_wheel(&config, "C", "wheel_up").is_none());
+        assert!(find_action_for_wheel(&config, "A", "wheel_down").is_none());
+        assert!(find_action_for_wheel(&config, "A", "wheel_up").is_some());
+    }
+
+    #[test]
+    fn find_action_for_wheel_first_match_wins_on_duplicate_slot_direction() {
+        let mut config = Config::default();
+        config.actions = vec![
+            wheel_action("A", "wheel_up"),
+            wheel_action("A", "wheel_up"),
+        ];
+
+        let found = find_action_for_wheel(&config, "A", "wheel_up").expect("should find first match");
+        assert_eq!(found as *const _, &config.actions[0] as *const _);
     }
 }

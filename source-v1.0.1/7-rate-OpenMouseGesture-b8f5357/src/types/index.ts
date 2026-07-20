@@ -8,14 +8,7 @@ export type MouseTriggerButton = "left" | "right" | "middle" | "x1" | "x2";
 export type TriggerModifier = "Ctrl" | "Alt" | "Shift";
 export type GestureTrigger = string;
 export type TriggerType = "gesture" | "wheel";
-export type WheelTrigger = 
-  | "wheel_up" 
-  | "wheel_down"
-  | "wheel_click"
-  | "x1_button"
-  | "x2_button"
-  | "leftclick_wheel_up"
-  | "leftclick_wheel_down";
+export type WheelTrigger = "wheel_up" | "wheel_down";
 
 export interface ActionGroup {
   id: string;

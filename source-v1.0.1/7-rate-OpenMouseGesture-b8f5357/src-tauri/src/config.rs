@@ -471,7 +471,7 @@ impl Action {
             self.trigger_type = default_trigger_type();
         }
 
-        if self.trigger_type == "gesture" && self.trigger_slot.is_empty() {
+        if (self.trigger_type == "gesture" || self.trigger_type == "wheel") && self.trigger_slot.is_empty() {
             self.trigger_slot = default_trigger_slot();
         }
 
@@ -533,15 +533,22 @@ impl Action {
             }
         }
 
-        if self.trigger_type == "wheel"
-            && self
+        if self.trigger_type == "wheel" {
+            if self
                 .wheel_trigger
                 .as_ref()
                 .map_or(true, |s| s.trim().is_empty())
-        {
-            return Err(ValidationError::MissingRequiredField(
-                "wheel_trigger".to_string(),
-            ));
+            {
+                return Err(ValidationError::MissingRequiredField(
+                    "wheel_trigger".to_string(),
+                ));
+            }
+            if !is_valid_trigger_slot(&self.trigger_slot) {
+                return Err(ValidationError::InvalidValue(format!(
+                    "invalid trigger_slot: {}",
+                    self.trigger_slot
+                )));
+            }
         }
 
         Ok(())
@@ -586,6 +593,7 @@ impl Config {
             .into_iter()
             .map(|action| action.normalized())
             .collect();
+        migrate_legacy_wheel_actions(&mut self.actions);
         self.groups = normalize_groups_and_actions(self.groups, &mut self.actions);
 
         self
@@ -722,6 +730,59 @@ fn sanitize_left_click_triggers_in_raw_json(content: &str) -> (String, Vec<&'sta
     }
 
     (content, slots)
+}
+
+/// 旧仕様の "leftclick_wheel_up"/"leftclick_wheel_down" は左クリック押下中の
+/// ホイール操作という廃止済みモデル向けの値。新モデルでは Trigger A/B/C +
+/// ホイール方向のみをサポートするため、対応する通常方向へ移行する。
+/// 移行先スロットは既存の trigger_slot（空なら "A"）を優先し、既に同じ
+/// スロット+方向の組み合わせが使用中であれば A→B→C の順で空きスロットを
+/// 探す。アクション自体（名前・実行内容）は一切変更せず、削除もしない。
+fn migrate_legacy_wheel_actions(actions: &mut [Action]) {
+    let mut occupied: HashSet<(String, String)> = HashSet::new();
+    for action in actions.iter() {
+        if action.trigger_type == "wheel" {
+            if let Some(direction) = action.wheel_trigger.as_deref() {
+                if direction == "wheel_up" || direction == "wheel_down" {
+                    occupied.insert((action.trigger_slot.clone(), direction.to_string()));
+                }
+            }
+        }
+    }
+
+    for action in actions.iter_mut() {
+        if action.trigger_type != "wheel" {
+            continue;
+        }
+
+        let direction = match action.wheel_trigger.as_deref() {
+            Some("leftclick_wheel_up") => "wheel_up",
+            Some("leftclick_wheel_down") => "wheel_down",
+            _ => continue,
+        };
+
+        let mut chosen_slot = if action.trigger_slot.is_empty() {
+            default_trigger_slot()
+        } else {
+            action.trigger_slot.clone()
+        };
+
+        if occupied.contains(&(chosen_slot.clone(), direction.to_string())) {
+            if let Some(free_slot) = ["A", "B", "C"]
+                .iter()
+                .map(|s| s.to_string())
+                .find(|s| !occupied.contains(&(s.clone(), direction.to_string())))
+            {
+                chosen_slot = free_slot;
+            }
+            // 全スロットが埋まっている場合でも、アクションは失わずに元の
+            // スロットへ移行する（ランタイム側は先勝ちで解決する）。
+        }
+
+        occupied.insert((chosen_slot.clone(), direction.to_string()));
+        action.trigger_slot = chosen_slot;
+        action.wheel_trigger = Some(direction.to_string());
+    }
 }
 
 fn normalize_groups_and_actions(
@@ -1562,6 +1623,126 @@ mod tests {
             assert_eq!(original.gesture, reloaded_action.gesture);
             assert_eq!(original.action_type, reloaded_action.action_type);
             assert_eq!(original.keystroke, reloaded_action.keystroke);
+        }
+    }
+
+    fn wheel_action(trigger_slot: &str, wheel_trigger: &str) -> Action {
+        Action {
+            trigger_type: "wheel".to_string(),
+            trigger_slot: trigger_slot.to_string(),
+            wheel_trigger: Some(wheel_trigger.to_string()),
+            action_type: "keystroke".to_string(),
+            keystroke: Some("PageDown".to_string()),
+            group_id: DEFAULT_GROUP_ID.to_string(),
+            ..Action::default()
+        }
+    }
+
+    #[test]
+    fn wheel_action_gets_default_slot_a_when_missing() {
+        let action = wheel_action("", "wheel_up").normalized();
+        assert_eq!(action.trigger_slot, "A");
+        assert_eq!(action.wheel_trigger.as_deref(), Some("wheel_up"));
+    }
+
+    #[test]
+    fn wheel_action_slot_is_uppercased() {
+        let action = wheel_action("b", "wheel_down").normalized();
+        assert_eq!(action.trigger_slot, "B");
+    }
+
+    #[test]
+    fn migrate_legacy_wheel_actions_converts_leftclick_variants_retaining_slot() {
+        let mut actions = vec![
+            wheel_action("B", "leftclick_wheel_up").normalized(),
+            wheel_action("C", "leftclick_wheel_down").normalized(),
+        ];
+        migrate_legacy_wheel_actions(&mut actions);
+
+        assert_eq!(actions[0].trigger_slot, "B");
+        assert_eq!(actions[0].wheel_trigger.as_deref(), Some("wheel_up"));
+        assert_eq!(actions[1].trigger_slot, "C");
+        assert_eq!(actions[1].wheel_trigger.as_deref(), Some("wheel_down"));
+    }
+
+    #[test]
+    fn migrate_legacy_wheel_actions_defaults_missing_slot_to_a() {
+        let mut actions = vec![wheel_action("", "leftclick_wheel_up")];
+        migrate_legacy_wheel_actions(&mut actions);
+        assert_eq!(actions[0].trigger_slot, "A");
+        assert_eq!(actions[0].wheel_trigger.as_deref(), Some("wheel_up"));
+    }
+
+    #[test]
+    fn migrate_legacy_wheel_actions_avoids_colliding_with_existing_wheel_up_action() {
+        // Slot A already has a real "wheel_up" action; a legacy leftclick_wheel_up
+        // action defaulting to slot A must move to a free slot instead of colliding
+        // and must never be dropped.
+        let mut actions = vec![
+            wheel_action("A", "wheel_up"),
+            wheel_action("", "leftclick_wheel_up"),
+        ];
+        migrate_legacy_wheel_actions(&mut actions);
+
+        assert_eq!(actions.len(), 2, "no action may be dropped during migration");
+        assert_eq!(actions[0].trigger_slot, "A");
+        assert_eq!(actions[0].wheel_trigger.as_deref(), Some("wheel_up"));
+        assert_eq!(actions[1].wheel_trigger.as_deref(), Some("wheel_up"));
+        assert_ne!(
+            actions[1].trigger_slot, "A",
+            "legacy action must be reassigned to a free slot rather than colliding"
+        );
+    }
+
+    #[test]
+    fn migrate_legacy_wheel_actions_keeps_action_when_all_slots_occupied() {
+        let mut actions = vec![
+            wheel_action("A", "wheel_up"),
+            wheel_action("B", "wheel_up"),
+            wheel_action("C", "wheel_up"),
+            wheel_action("", "leftclick_wheel_up"),
+        ];
+        migrate_legacy_wheel_actions(&mut actions);
+
+        assert_eq!(actions.len(), 4, "action must be retained even when every slot is occupied");
+        assert_eq!(actions[3].wheel_trigger.as_deref(), Some("wheel_up"));
+    }
+
+    #[test]
+    fn migrate_legacy_wheel_actions_leaves_modern_actions_untouched() {
+        let mut actions = vec![wheel_action("B", "wheel_down")];
+        let before = actions.clone();
+        migrate_legacy_wheel_actions(&mut actions);
+        assert_eq!(actions, before);
+    }
+
+    #[test]
+    fn config_normalized_migrates_legacy_wheel_actions_end_to_end() {
+        let mut config = Config::default();
+        config.actions = vec![wheel_action("", "leftclick_wheel_down")];
+        let normalized = config.normalized();
+
+        assert_eq!(normalized.actions.len(), 1, "legacy wheel action must survive normalization");
+        assert_eq!(normalized.actions[0].wheel_trigger.as_deref(), Some("wheel_down"));
+        assert_eq!(normalized.actions[0].trigger_slot, "A");
+    }
+
+    #[test]
+    fn wheel_action_validate_rejects_invalid_trigger_slot() {
+        let mut action = wheel_action("A", "wheel_up").normalized();
+        action.trigger_slot = "Z".to_string();
+        let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
+        assert!(action.validate(&known_groups).is_err());
+    }
+
+    #[test]
+    fn wheel_action_validate_accepts_wheel_up_and_down_per_slot() {
+        let known_groups: HashSet<String> = [DEFAULT_GROUP_ID.to_string()].into_iter().collect();
+        for slot in ["A", "B", "C"] {
+            for direction in ["wheel_up", "wheel_down"] {
+                let action = wheel_action(slot, direction).normalized();
+                assert!(action.validate(&known_groups).is_ok());
+            }
         }
     }
 }

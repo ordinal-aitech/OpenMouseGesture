@@ -2,6 +2,32 @@
 
 This changelog is reconstructed from the repository's current Git history, current source code, and tracked project documentation. It records verified changes without inventing release numbers or dates that are not present in the repository.
 
+## 2026-07-20
+
+### Modifier keyboard trigger reliability fix
+
+- Root cause: `keyboard_hook_proc` tracked Shift/Ctrl/Alt modifier state purely from `WH_KEYBOARD_LL` down/up events accumulated in a process-global `PRESSED_KEYS` set. That tracking has no way to recover if a down/up event is ever missed (a modifier already held before the hook installs, a focus change, a UAC prompt, or any other event the low-level hook doesn't see), which silently desyncs the internally tracked modifier state from the real physical key state. Because single-key triggers (e.g. `Z`) never consult modifier state at all, they were unaffected, while modifier combinations such as `Shift+F1`/`Shift+F2`/`Shift+F3` appeared to work "sometimes" depending on whether the internal tracking happened to still be in sync — matching the reported symptom.
+- Fix: added `live_modifier_vks()`/`keys_with_live_modifiers()` in `mouse_hook.rs`, which cross-check the tracked key set against live `GetAsyncKeyState` for all documented Shift/Ctrl/Alt virtual-key codes (both the generic and the left/right-specific codes) at the moment of each keyboard hook event, and used the merged result for both trigger-start matching (`trigger_slot_for_keyboard_down`) and trigger-release matching (`keyboard_trigger_active`). This makes modifier detection self-healing against any missed event instead of depending entirely on having observed every prior down/up.
+- Added bounded `diag_log` tracing to the keyboard hook path (previously only the mouse hook path was traced), covering key down/up VK codes, live-modifier deltas, trigger match/no-match, and trigger-release, gated by the same `OMG_DEBUG_HOOK`/`ENABLE_HOOK_DEBUG` mechanism used elsewhere (default off, bounded log size).
+- Added regression tests covering `Shift+F1`/`Shift+F2`/`Shift+F3` start/hold/release behavior, generic vs. left/right-specific modifier VK codes, Ctrl/Alt combinations, and confirmation that single-key triggers remain unaffected by modifier-matching logic.
+
+Source basis:
+
+- Current `src-tauri/src/mouse_hook.rs`.
+
+### Trigger-slot-aware wheel actions; left-click+wheel model removed
+
+- Root cause: wheel action lookup ignored which Trigger slot (A/B/C) started the active gesture session and matched only on `wheel_trigger` globally, and additionally branched into a `leftclick_wheel_up`/`leftclick_wheel_down` model keyed off whether the left mouse button happened to be held during the wheel event — a model unrelated to the configured trigger slots and inconsistent with the rest of the trigger system.
+- Fix: wheel actions are now keyed by `wheel:<trigger_slot>:<wheel_direction>` and resolved via a new `find_action_for_wheel(config, trigger_slot, wheel_direction)` (mirroring `find_action_for_gesture`), using the slot that started the active gesture session. Wheel dispatch in `mouse_hook.rs` no longer reads or depends on left-click state at all; the `IS_LEFT_PRESSED` tracking state was removed as dead weight once nothing consulted it.
+- Config schema: `Action.trigger_slot` (already used by gesture actions) is now also used by wheel actions, defaulting to `A` when unset. `Action::validate` now requires a valid `trigger_slot` for wheel actions, matching the existing gesture-action rule.
+- Legacy migration: `Config::normalized()` now migrates any existing `leftclick_wheel_up`/`leftclick_wheel_down` actions to `wheel_up`/`wheel_down` on their existing (or defaulted `A`) `trigger_slot`, reassigning to the next free slot (`A` → `B` → `C`) only if that would otherwise collide with an existing `wheel_up`/`wheel_down` action already on that slot. No action is ever dropped by this migration, even in the (contrived) case where all three slots are already occupied.
+- Frontend: `ActionEditor.tsx` now shows the Trigger Slot selector for wheel actions as well as gesture actions, and the wheel-trigger dropdown was narrowed to `wheel_up`/`wheel_down` only (removing the never-functional `wheel_click`/`x1_button`/`x2_button`/`leftclick_wheel_up`/`leftclick_wheel_down` options). `getActionKey`/`getActionDisplayTrigger` in `utils/actionKey.ts` and the trigger pill in `ActionList.tsx` were updated to reflect the slot-aware wheel key.
+- Added regression tests covering per-slot/per-direction wheel action lookup (all six A/B/C × up/down combinations), no cross-slot dispatch, first-match-wins behavior on duplicate slot+direction entries, and legacy migration (slot defaulting, collision avoidance, and action retention when every slot is occupied).
+
+Source basis:
+
+- Current `src-tauri/src/mouse_hook.rs`, `src-tauri/src/lib.rs`, `src-tauri/src/config.rs`, `src/components/actions/ActionEditor.tsx`, `src/components/actions/ActionList.tsx`, `src/utils/actionKey.ts`, `src/types/index.ts`.
+
 ## 2026-07-18
 
 ### Config reset-to-default data-loss fix

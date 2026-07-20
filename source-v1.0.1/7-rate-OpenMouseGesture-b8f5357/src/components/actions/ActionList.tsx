@@ -19,11 +19,6 @@ interface ActionListProps {
 const wheelTriggerLabels: Record<WheelTrigger, string> = {
   wheel_up: "ホイール上",
   wheel_down: "ホイール下",
-  wheel_click: "ホイールクリック",
-  x1_button: "X1ボタン",
-  x2_button: "X2ボタン",
-  leftclick_wheel_up: "左クリック+ホイール上",
-  leftclick_wheel_down: "左クリック+ホイール下",
 };
 
 const DEFAULT_GROUP_ID = "group-uncategorized";
@@ -238,15 +233,11 @@ export function ActionList({
                       </div>
                     </div>
                     <div className="action-col-trigger">
-                      {wheel ? (
-                        <div className="action-trigger-only wheel">
-                          <div className="trigger-pill wheel">ホイール</div>
+                      <div className={wheel ? "action-trigger-only wheel" : "action-trigger-only"}>
+                        <div className={wheel ? "trigger-pill wheel" : "trigger-pill"}>
+                          {`Trigger ${normalizeTriggerSlot(action.trigger_slot)}`}
                         </div>
-                      ) : (
-                        <div className="action-trigger-only">
-                          <div className="trigger-pill">{`Trigger ${normalizeTriggerSlot(action.trigger_slot)}`}</div>
-                        </div>
-                      )}
+                      </div>
                     </div>
                     <div className="action-col-gesture">
                       {wheel ? (

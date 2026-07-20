@@ -50,11 +50,6 @@ const keyOptions = [
 const wheelTriggerOptions: { value: WheelTrigger; label: string }[] = [
   { value: "wheel_up", label: "ホイール上" },
   { value: "wheel_down", label: "ホイール下" },
-  { value: "wheel_click", label: "ホイールクリック" },
-  { value: "x1_button", label: "X1ボタン" },
-  { value: "x2_button", label: "X2ボタン" },
-  { value: "leftclick_wheel_up", label: "左クリック+ホイール上" },
-  { value: "leftclick_wheel_down", label: "左クリック+ホイール下" },
 ];
 
 export function ActionEditor({ action, gestures, actions, groupName, isNew = false, onChange }: ActionEditorProps) {
@@ -148,7 +143,7 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
       name: name.trim() || undefined,
       group_id: action?.group_id,
       trigger_type: triggerType,
-      trigger_slot: triggerType === "gesture" ? triggerSlot : undefined,
+      trigger_slot: triggerSlot,
       gesture: triggerType === "gesture" ? gesture : "",
       wheel_trigger: triggerType === "wheel" && wheelTrigger ? wheelTrigger : undefined,
       action_type: actionType,
@@ -216,37 +211,36 @@ export function ActionEditor({ action, gestures, actions, groupName, isNew = fal
           </select>
         </div>
 
+        <div className="form-group">
+          <label htmlFor="trigger-slot">Trigger Slot</label>
+          <select id="trigger-slot" value={triggerSlot} onChange={(e) => setTriggerSlot(e.target.value as TriggerSlot)}>
+            {triggerSlotOptions.map((slot) => (
+              <option key={slot} value={slot}>
+                Trigger {slot}
+              </option>
+            ))}
+          </select>
+        </div>
+
         {triggerType === "gesture" && (
-          <>
-            <div className="form-group">
-              <label htmlFor="trigger-slot">Trigger Slot</label>
-              <select id="trigger-slot" value={triggerSlot} onChange={(e) => setTriggerSlot(e.target.value as TriggerSlot)}>
-                {triggerSlotOptions.map((slot) => (
-                  <option key={slot} value={slot}>
-                    Trigger {slot}
+          <div className="form-group">
+            <label htmlFor="action-gesture">ジェスチャー</label>
+            <div className="gesture-select-row">
+              {selectedGestureData && (
+                <div className="gesture-preview-small">
+                  <GestureCanvas points={selectedGestureData.points} width={50} height={50} strokeWidth={2} />
+                </div>
+              )}
+              <select id="action-gesture" value={gesture} onChange={(e) => setGesture(e.target.value)}>
+                <option value="">選択してください</option>
+                {availableGestures.map((g) => (
+                  <option key={g.name} value={g.name}>
+                    {g.name}
                   </option>
                 ))}
               </select>
             </div>
-            <div className="form-group">
-              <label htmlFor="action-gesture">ジェスチャー</label>
-              <div className="gesture-select-row">
-                {selectedGestureData && (
-                  <div className="gesture-preview-small">
-                    <GestureCanvas points={selectedGestureData.points} width={50} height={50} strokeWidth={2} />
-                  </div>
-                )}
-                <select id="action-gesture" value={gesture} onChange={(e) => setGesture(e.target.value)}>
-                  <option value="">選択してください</option>
-                  {availableGestures.map((g) => (
-                    <option key={g.name} value={g.name}>
-                      {g.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </>
+          </div>
         )}
 
         {triggerType === "wheel" && (

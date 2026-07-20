@@ -4,7 +4,7 @@
 
 OpenMouseGesture is a Windows mouse-gesture utility rebuilt as a Tauri desktop app. It is intended for users who want global gesture input, per-gesture action mapping, tray-based background operation, and portable distribution artifacts that can be rebuilt from source.
 
-This document describes the current implementation in `main` as of July 18, 2026. It is the project-level specification for the repository, not a task log.
+This document describes the current implementation in `main` as of July 20, 2026. It is the project-level specification for the repository, not a task log.
 
 ## Current Status
 
@@ -12,8 +12,9 @@ This document describes the current implementation in `main` as of July 18, 2026
 - The app is a working Tauri 2 + React + TypeScript + Rust implementation for Windows.
 - Recent fixes on July 17-18, 2026 hardened startup reliability, tray behavior, right-click passthrough, trajectory rendering stability, and left-click trigger safety.
 - On July 18, 2026 the "reset to default" config/gestures commands were hardened to back up existing settings before overwriting, closing the gap that had let a user's custom action set be replaced by the bundled 5-action default without a recoverable copy.
+- On July 20, 2026, two user-reported defects were fixed: modifier keyboard triggers (`Shift+F1`/`Shift+F2`/`Shift+F3` and similar) now cross-check live OS modifier state instead of relying solely on tracked down/up events, and wheel actions are now resolved by active Trigger slot (A/B/C) + wheel direction instead of by left-click state, with the legacy `leftclick_wheel_up`/`leftclick_wheel_down` model removed from runtime and UI and migrated on load.
 - Root-level `dist/windows/` export flow exists and is intended to be the stable distribution handoff location.
-- Some physical runtime checks remain desirable on a real Windows machine, especially around hardware-specific buttons and installer upgrade paths.
+- Some physical runtime checks remain desirable on a real Windows machine, especially around hardware-specific buttons, modifier keyboard triggers, wheel actions, and installer upgrade paths.
 
 ## Repository Layout
 
@@ -152,6 +153,8 @@ This was fixed on July 18, 2026 after a regression where ordinary right-click st
 - The gesture starts when the configured key goes down while the required modifiers are held.
 - The gesture ends when the key combination is no longer active.
 - The current pointer position becomes the gesture start point.
+- Modifier state (Shift/Ctrl/Alt) is tracked from `WH_KEYBOARD_LL` down/up events, but that tracking is also cross-checked against live `GetAsyncKeyState` at the moment of each key event. This closes a reliability gap where a missed down/up event (focus changes, UAC prompts, a modifier already held before the hook installs) could desync the internally tracked modifier state from the real physical state, which showed up as `Shift+F1`/`Shift+F2`/`Shift+F3`-style combinations starting unreliably compared to single-key triggers like `Z`.
+- Both `WM_KEYDOWN`/`WM_KEYUP` and `WM_SYSKEYDOWN`/`WM_SYSKEYUP` are handled, so Alt-held combinations (which Windows delivers as "system key" messages) work the same as Shift/Ctrl combinations.
 
 ### Current keyboard-trigger limitation
 
@@ -196,16 +199,20 @@ For gesture actions:
 
 Wheel actions are keyed by:
 
-- `wheel:<wheel_trigger>`
+- `wheel:<trigger_slot>:<wheel_trigger>`
 
-Current runtime implementation handles these wheel paths during an active drag session:
+Wheel actions are resolved by which Trigger slot (A, B, or C) started the currently active gesture session, plus wheel direction. While Trigger A is held and the wheel moves, only the action configured for Trigger A + that direction fires; the same rule applies independently to Trigger B and Trigger C. Wheel dispatch does not depend on left-click state in any way.
+
+Current runtime implementation handles these wheel directions during an active drag session:
 
 - `wheel_up`
 - `wheel_down`
-- `leftclick_wheel_up`
-- `leftclick_wheel_down`
 
-The frontend also exposes `wheel_click`, `x1_button`, and `x2_button` wheel-style options, but the current low-level hook implementation in `mouse_hook.rs` only dispatches wheel actions from `WM_MOUSEWHEEL` while dragging. Documentation and future work should not assume broader runtime support without code changes.
+Each wheel tick clears the accumulated trajectory (so repeated ticks don't get misread as a gesture shape) but leaves the gesture session (the held trigger) active, so repeated ticks while the trigger stays held keep dispatching per-slot wheel actions coherently. Releasing the trigger after only wheel activity (no further pointer movement) does not additionally dispatch a gesture action, since the trajectory was cleared by the last tick.
+
+The legacy `leftclick_wheel_up`/`leftclick_wheel_down` model (an action bound to left-click held down plus wheel movement) has been removed from the runtime and the UI. On load, `Config::normalized()` migrates any existing `leftclick_wheel_up`/`leftclick_wheel_down` actions to `wheel_up`/`wheel_down` on the action's existing `trigger_slot` (defaulting to `A` if unset), reassigning to the next free slot (`A` → `B` → `C`) only if that would otherwise collide with an existing `wheel_up`/`wheel_down` action already on that slot. The action itself (name, keystroke/command/url/window operation) is never dropped by this migration.
+
+The frontend no longer exposes `wheel_click`, `x1_button`, or `x2_button` as wheel-action directions; the current low-level hook implementation in `mouse_hook.rs` only ever dispatched `wheel_up`/`wheel_down` from `WM_MOUSEWHEEL` while dragging, so these were already dead options.
 
 ### Ignore lists
 
@@ -395,7 +402,6 @@ npm run test:dist
 ## Known Limitations
 
 - Keyboard trigger keys are still delivered to other applications.
-- Frontend wheel-action options currently exceed what the backend hook path clearly dispatches.
 - Real-hardware verification is still warranted for `Mouse X1` and `Mouse X2` on target machines.
 - Real installer upgrade testing, including elevation and replacement of a running install, is still warranted.
 - Tray failure fallback is implemented, but `os error 5` style startup environments should still be included in regression checks.
@@ -409,3 +415,5 @@ Recommended real-machine checks that remain useful:
 3. Verify ordinary right-click context menus when `Mouse Right` is assigned to Trigger A, Trigger B, and Trigger C respectively.
 4. Verify startup behavior when the tray cannot initialize and confirm hooks still install.
 5. Verify installer upgrade, file-lock handling, and post-install launch behavior on a clean Windows machine.
+6. Assign `Shift+F1`, `Shift+F2`, `Shift+F3` to Trigger A/B/C respectively and confirm each starts and releases its own gesture reliably (including left/right Shift), and confirm a single-key trigger such as `Z` still works.
+7. Assign distinct actions to Trigger A/B/C combined with Wheel Up and Wheel Down (six combinations total) and confirm no cross-slot dispatch and no dependency on left-click state.
