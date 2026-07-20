@@ -1,9 +1,11 @@
 mod action_label_overlay;
+mod autostart;
 mod command_executor;
 mod config;
 mod gesture_recognizer;
 mod mouse_hook;
 mod trajectory_renderer;
+mod tray_icon;
 
 use config::{Action, Config, ConfigManager};
 use once_cell::sync::OnceCell;
@@ -16,6 +18,7 @@ use tauri::{
     tray::{TrayIcon, TrayIconBuilder},
     AppHandle, Emitter, Manager, WebviewWindow,
 };
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 #[cfg(target_os = "windows")]
 use windows::Win32::{
@@ -135,11 +138,7 @@ fn update_tray_icon(enabled: bool) {
     if let Some(tray_mutex) = TRAY_ICON.get() {
         if let Ok(mut tray_opt) = tray_mutex.lock() {
             if let Some(tray) = tray_opt.as_mut() {
-                let icon_bytes: &[u8] = if enabled {
-                    include_bytes!("../icons/128x128.png")
-                } else {
-                    include_bytes!("../icons/256x256_disabled.png")
-                };
+                let icon_bytes = tray_icon::icon_bytes_for_state(enabled);
 
                 if let Some(icon) = load_icon_from_bytes(icon_bytes) {
                     let _ = tray.set_icon(Some(icon));
@@ -528,6 +527,38 @@ fn validate_gestures_file() -> Result<bool, String> {
     Ok(manager.load_gestures().is_ok())
 }
 
+/// 実際のOSレジストリ登録状態を都度問い合わせて返す。設定画面のチェック
+/// ボックスは、保存済み設定値ではなく必ずこの値で表示状態を決める。
+#[tauri::command]
+fn get_autostart_status(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+/// 有効化/無効化を試みた後、成否にかかわらず必ずOSへ実際の状態を
+/// 再問い合わせして返す。失敗時に誤って成功したかのような値を返さない。
+#[tauri::command]
+fn set_autostart_enabled(app: AppHandle, enabled: bool) -> Result<bool, String> {
+    let autolaunch = app.autolaunch();
+    let action_result = if enabled {
+        autolaunch.enable()
+    } else {
+        autolaunch.disable()
+    };
+
+    if let Err(err) = action_result {
+        let actual_after_failure = autolaunch.is_enabled().unwrap_or(false);
+        eprintln!(
+            "[autostart] {} failed: {} (actual state after attempt: {})",
+            if enabled { "enable" } else { "disable" },
+            err,
+            actual_after_failure
+        );
+        return Err(err.to_string());
+    }
+
+    autolaunch.is_enabled().map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn get_config_validation_error() -> Result<Option<String>, String> {
     let manager = ConfigManager::new()?;
@@ -589,7 +620,8 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let menu = Menu::with_items(app, &[&show, &toggle, &quit])?;
     let _ = TOGGLE_MENU_ITEM.set(toggle);
 
-    let icon = load_icon_from_bytes(include_bytes!("../icons/128x128.png"))
+    let initial_enabled = *GESTURE_ENABLED.lock().unwrap();
+    let icon = load_icon_from_bytes(tray_icon::icon_bytes_for_state(initial_enabled))
         .or_else(|| app.default_window_icon().cloned())
         .unwrap_or_else(|| Image::new_owned(vec![0; 32 * 32 * 4], 32, 32));
 
@@ -652,14 +684,52 @@ fn set_titlebar_color(_window: &WebviewWindow) -> Result<(), Box<dyn std::error:
     Ok(())
 }
 
+/// 起動時に「OSへ既にautostart登録済み」の場合のみ、現在の実行ファイルパスで
+/// 登録を上書きし直す（パスを比較する手段が無いため常に上書きする、
+/// enable() 自体は冪等なので実害はない）。これにより再インストールや
+/// アップデートで実行ファイルパスが変わっても、登録が古いパスを指したまま
+/// 残ることを防ぐ。ユーザーが明示的に無効化している場合（is_enabled==false）
+/// は何もせず、無効化状態を尊重する。
+fn refresh_autostart_registration_path(app: &AppHandle) {
+    let autolaunch = app.autolaunch();
+    match autolaunch.is_enabled() {
+        Ok(true) => {
+            if let Err(err) = autolaunch.enable() {
+                eprintln!("[startup] autostart path refresh failed: {}", err);
+            } else {
+                eprintln!("[startup] autostart registration refreshed for current executable path");
+            }
+        }
+        Ok(false) => {}
+        Err(err) => eprintln!("[startup] autostart state query failed: {}", err),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            eprintln!("[startup] duplicate launch attempted, args={:?}", argv);
+            if autostart::should_focus_window_for_relaunch(argv.as_slice()) {
+                show_main_window(app);
+            }
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec![autostart::AUTOSTART_ARG]),
+        ))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             eprintln!("[startup] GestureHotkeyApp setup begin");
             let _ = APP_HANDLE.set(app.handle().clone());
+
+            let launch_args: Vec<String> = std::env::args().collect();
+            let launched_via_autostart = autostart::is_autostart_launch(launch_args.as_slice());
+            eprintln!("[startup] launched_via_autostart={}", launched_via_autostart);
+
+            refresh_autostart_registration_path(app.handle());
+
             let tray_ready = match setup_tray(app.handle()) {
                 Ok(_) => {
                     eprintln!("[startup] tray ready");
@@ -714,7 +784,7 @@ pub fn run() {
                 eprintln!("[startup] mouse hook installed");
             }
 
-            if !tray_ready {
+            if autostart::should_show_main_window_on_startup(tray_ready) {
                 eprintln!("[startup] tray unavailable, showing main window fallback");
                 show_main_window(app.handle());
             }
@@ -743,6 +813,8 @@ pub fn run() {
             delete_action,
             set_gesture_enabled,
             is_gesture_enabled,
+            get_autostart_status,
+            set_autostart_enabled,
             get_config_file_path,
             get_gestures_file_path,
             reset_config_to_default,

@@ -229,8 +229,45 @@ export function SettingsTab() {
   const [triggerCColor, setTriggerCColor] = useState(config.triggerCColor);
   const [captureSlot, setCaptureSlot] = useState<TriggerSlot | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [autostartEnabled, setAutostartEnabledState] = useState(false);
+  const [autostartBusy, setAutostartBusy] = useState(false);
+  const [autostartError, setAutostartError] = useState<string | null>(null);
   const skipSyncRef = useRef(false);
   const captureReadyAtRef = useRef(0);
+
+  const reloadAutostartStatus = useCallback(async () => {
+    try {
+      const enabled = await api.getAutostartStatus();
+      setAutostartEnabledState(enabled);
+      setAutostartError(null);
+    } catch (err) {
+      setAutostartError(err instanceof Error ? err.message : "自動起動設定の取得に失敗しました");
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadAutostartStatus();
+  }, [reloadAutostartStatus]);
+
+  const handleAutostartToggle = useCallback(
+    async (checked: boolean) => {
+      setAutostartBusy(true);
+      setAutostartError(null);
+      try {
+        const actual = await api.setAutostartEnabled(checked);
+        setAutostartEnabledState(actual);
+      } catch (err) {
+        setAutostartError(err instanceof Error ? err.message : "自動起動設定の変更に失敗しました");
+        // Never trust the attempted value on failure; always re-query the
+        // real OS registration state so the checkbox cannot show a false
+        // "success" that doesn't match reality.
+        await reloadAutostartStatus();
+      } finally {
+        setAutostartBusy(false);
+      }
+    },
+    [reloadAutostartStatus]
+  );
 
   useEffect(() => {
     if (skipSyncRef.current) {
@@ -449,6 +486,25 @@ export function SettingsTab() {
     <div className="settings-tab">
       <div className="settings-content">
         <h2 className="settings-title">グローバル設定</h2>
+
+        <div className="settings-section">
+          <h3 className="section-title">起動設定</h3>
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={autostartEnabled}
+              disabled={autostartBusy}
+              onChange={(event) => {
+                void handleAutostartToggle(event.target.checked);
+              }}
+            />
+            <span>Windows起動時に自動起動</span>
+          </label>
+          <p className="section-desc">
+            有効にすると、Windowsサインイン時にトレイに常駐した状態で自動的に起動します。
+          </p>
+          {autostartError && <p className="settings-error">{autostartError}</p>}
+        </div>
 
         <div className="settings-section">
           <h3 className="section-title">表示設定</h3>

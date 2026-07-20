@@ -53,6 +53,14 @@ export async function isGestureEnabled(): Promise<boolean> {
   return invoke<boolean>("is_gesture_enabled");
 }
 
+export async function getAutostartStatus(): Promise<boolean> {
+  return invoke<boolean>("get_autostart_status");
+}
+
+export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_autostart_enabled", { enabled });
+}
+
 export async function getConfigFilePath(): Promise<string> {
   return invoke<string>("get_config_file_path");
 }

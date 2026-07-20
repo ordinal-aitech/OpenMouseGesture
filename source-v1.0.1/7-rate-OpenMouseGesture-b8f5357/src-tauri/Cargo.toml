@@ -33,3 +33,5 @@ windows = { version = "0.62.2", features = [
     "Win32_Graphics_Dwm",
     "Win32_UI_Shell",
 ] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-single-instance = "2.4.3"
