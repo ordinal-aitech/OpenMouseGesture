@@ -2,6 +2,72 @@
 
 This file is the canonical change history for OpenMouseGesture. Current specification, limitations, and operating state are maintained in `PROJECT.md`.
 
+## 2026-07-23 - Overlay z-order, renderer self-recovery, and stuck-session repair
+
+### Fixed
+
+- Trajectory overlay now re-asserts the top of the TOPMOST band at gesture start
+  using a z-order-only `SetWindowPos` (`SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE`),
+  so the trajectory is drawn above fullscreen/borderless windows (for example
+  MPC-BE in non-exclusive fullscreen) that raised themselves after the overlay was
+  created. The fixed virtual-desktop origin/size invariant is preserved (no
+  move/resize), so the existing no-trembling guarantee is unchanged.
+- Changed the overlay to an always-shown model: "no trajectory" is now a fully
+  transparent frame instead of a hidden window. Removing the per-frame and
+  gesture-boundary `ShowWindow` show/hide transitions stops the DWM compositor from
+  briefly exposing windows behind the foreground application while drawing over an
+  overlapped browser. The overlay remains input-transparent (`WS_EX_TRANSPARENT`),
+  non-activating (`WS_EX_NOACTIVATE`), click-through, and never activates, focuses,
+  reorders, or exposes other windows.
+- Added bounded, idempotent renderer self-recovery. If the overlay window or its
+  render thread is lost, destroyed, or hidden, the next gesture start recreates it
+  (guarded against duplicate windows, threads, and message loops). Trajectory
+  rendering no longer becomes permanently unavailable until a full process restart.
+- Added a per-session release watchdog. When the normal trigger-release path
+  (button-up/key-up event) is missed, reordered, or duplicated, the watchdog polls
+  the physical trigger state and terminates the stuck session through the
+  centralized cancel path, which never dispatches an action. The existing 120 ms
+  confirmed-release behavior is preserved; the watchdog uses a longer 300 ms grace
+  so the normal release path always terminates a genuine release first.
+
+### Verification
+
+- Rust test suite: 149 tests passed (11 new: renderer recovery decision, overlay
+  native-window configuration, and watchdog grace / physical-state probe /
+  session-generation / teardown-never-dispatches coverage).
+- Frontend build passed.
+- Tauri build passed (release EXE and NSIS installer).
+- Distribution tests: 7 passed.
+- `git diff --check`: clean.
+- The above is automated evidence only. The following still require human physical
+  verification on the target machine and are NOT yet verified:
+  - MPC-BE fullscreen trajectory visibility.
+  - No background-window exposure while drawing over a foreground browser with
+    overlapping windows.
+  - Long-running confirmation that trajectory rendering no longer becomes
+    permanently unavailable.
+  - Repeated real trigger press/release confirmation that gesture sessions do not
+    stick.
+
+### Unresolved / environment-blocked
+
+- `npm run dist:windows` could not complete in this run: the user's resident
+  OpenMouseGesture application was running from `dist/windows/OpenMouseGesture-x64.exe`
+  and held an exclusive lock on the previously exported EXE, so the export script
+  could not clean/overwrite `dist/windows`. This is an environment lock, not a build
+  defect (the Tauri release build that feeds the export succeeded). After exiting the
+  tray app (right-click tray -> 終了), re-run `npm run dist:windows` to refresh the
+  distribution artifacts.
+- Exclusive-fullscreen (Direct3D exclusive mode / hardware overlay) applications
+  bypass the desktop compositor and cannot be overlaid by any non-exclusive window;
+  trajectory visibility over such windows remains a Windows platform limitation.
+
+Source basis:
+
+- Implementation changes are confined to
+  `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/src/trajectory_renderer.rs`
+  and `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/src-tauri/src/mouse_hook.rs`.
+
 ## 2026-07-21 - Practical repair cycle completed
 
 ### Changed

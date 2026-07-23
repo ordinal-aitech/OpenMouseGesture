@@ -34,6 +34,14 @@ const DIAG_MOVE_LOG_INTERVAL_MS: u64 = 200;
 /// 一時的な keyup/key down チャタリングでは軌跡を維持し、確定した release だけを終了にする。
 pub const TRIGGER_RELEASE_GRACE_MS: u64 = 120;
 
+/// セッション_watchdog の物理トリガー状態ポーリング間隔（ミリ秒）。
+const WATCHDOG_POLL_MS: u64 = 30;
+/// watchdog が「トリガーが物理的に離され続けている」と確定するまでの猶予（ミリ秒）。
+/// 通常リリース経路（button-up/key-up イベント）の 120ms 確定より長く取ることで、
+/// 正常経路が先にセッションを終了させ、watchdog は「リリースイベントを取りこぼして
+/// セッションが stuck した」場合だけの安全網として発火する（=早期送出を決して起こさない）。
+const WATCHDOG_RELEASE_GRACE_MS: u64 = 300;
+
 /// 診断ログはデフォルト無効。`OMG_DEBUG_HOOK=1` を設定して起動するか、
 /// `<config_dir>/ENABLE_HOOK_DEBUG` マーカーファイルを起動前に置いた場合のみ、
 /// `<config_dir>/hook_debug.log` へ追記する（サイズ上限に達したら切り詰め）。
@@ -126,8 +134,20 @@ static KEYBOARD_RELEASE_STATE: Mutex<KeyboardReleaseState> =
 /// keydown）を確実に同じインタラクションとして飲み込むためのフラグ。
 static ESCAPE_CANCEL_CONSUMING: Mutex<bool> = Mutex::new(false);
 
+/// セッション世代。begin/complete/cancel のたびに単調増加する。watchdog スレッドは
+/// 開始時に自分の世代を捕獲し、現在の世代が異なれば（=そのセッションが既に終了、
+/// または新しいセッションに置き換わった）ただちに終了する。これにより、同じスロットを
+/// 素早く再利用しても古い watchdog が新しいセッションに干渉・誤キャンセルしない。
+static SESSION_GENERATION: Mutex<u64> = Mutex::new(0);
+
 const VK_CAPITAL: u16 = 0x14;
 const VK_ESCAPE: u16 = 0x1B;
+// マウスボタンの物理押下状態を GetAsyncKeyState で照会するための仮想キーコード。
+// watchdog が「トリガーボタンがまだ物理的に押されているか」を判定するのに使う。
+const VK_RBUTTON: u16 = 0x02;
+const VK_MBUTTON: u16 = 0x04;
+const VK_XBUTTON1: u16 = 0x05;
+const VK_XBUTTON2: u16 = 0x06;
 const VK_SHIFT: u16 = 0x10;
 const VK_CONTROL: u16 = 0x11;
 const VK_MENU: u16 = 0x12;
@@ -639,10 +659,27 @@ fn resolve_window_for_point(point: POINT) -> HWND {
     }
 }
 
-fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, current_window: HWND) {
+/// セッション世代を単調増加させ、新しい世代を返す。セッションを開始・完了・
+/// キャンセルするたびに呼び、古い watchdog が既に終了したセッションを監視し
+/// 続けないようにする。
+fn bump_session_generation() -> u64 {
+    let mut generation = SESSION_GENERATION.lock().unwrap();
+    *generation = generation.wrapping_add(1);
+    *generation
+}
+
+/// 新しいジェスチャーセッションを開始し、そのセッション世代を返す。
+/// 世代は watchdog が「自分が監視しているセッションがまだ現在のものか」を判定するのに使う。
+fn begin_gesture(
+    config: &crate::config::Config,
+    slot: &str,
+    point: POINT,
+    current_window: HWND,
+) -> u64 {
+    let generation = bump_session_generation();
     diag_log(format!(
-        "gesture-session begin slot={} point=({},{})",
-        slot, point.x, point.y
+        "gesture-session begin slot={} point=({},{}) generation={}",
+        slot, point.x, point.y, generation
     ));
     *GESTURE_START_WINDOW.lock().unwrap() = Some(current_window.0 as isize);
     *IS_DRAGGING.lock().unwrap() = true;
@@ -657,6 +694,7 @@ fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, curre
     crate::set_active_trail_color(crate::color_for_trigger_slot(config, slot));
     clear_preview_state();
     crate::emit_trajectory_update(&[(point.x, point.y)], true);
+    generation
 }
 
 /// 短いクリック（移動点数が閾値以下）で、かつそのスロットに割り当てられた
@@ -760,6 +798,7 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
     *GESTURE_START_WINDOW.lock().unwrap() = None;
     KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
+    bump_session_generation();
 }
 
 /// すべての強制終了経路（無効化・設定変更・フック再インストール・アクション
@@ -774,6 +813,7 @@ pub fn cancel_active_gesture_session() {
     TRAJECTORY.lock().unwrap().clear();
     clear_preview_state();
     crate::emit_trajectory_update(&[], false);
+    bump_session_generation();
     diag_log("gesture session cancelled via centralized teardown");
 }
 
@@ -781,6 +821,85 @@ fn session_is_active_or_release_pending() -> bool {
     // release-pending の間も complete_gesture が呼ばれるまで IS_DRAGGING は
     // true のままなので、この一つのフラグでアクティブ/保留中の両方を表せる。
     *IS_DRAGGING.lock().unwrap()
+}
+
+/// 指定スロットのトリガーが今まさに物理的に押下（マウスボタンまたはキー）されているかを
+/// GetAsyncKeyState で直接照会する。低レベルフックが button-up/key-up イベントを取り
+/// こぼしても物理状態は正しいため、watchdog が stuck セッションを検出する根拠に使う。
+/// マウストリガーは対応するボタン VK、キーボードトリガーはその主キー VK で判定する
+/// （組合せトリガーは主キーが離された時点でトリガー解除とみなせる）。
+fn trigger_physically_held(config: &crate::config::Config, slot: &str) -> bool {
+    let trigger = crate::trigger_button_for_slot(config, slot);
+
+    if let Some(button) = parse_mouse_trigger(trigger) {
+        let vk = match button {
+            "right" => VK_RBUTTON,
+            "middle" => VK_MBUTTON,
+            "x1" => VK_XBUTTON1,
+            "x2" => VK_XBUTTON2,
+            _ => return false,
+        };
+        return trigger_key_is_physically_down(vk);
+    }
+
+    if let Some((_modifiers, code)) = crate::config::parse_keyboard_trigger(trigger) {
+        if let Some(vk) = crate::config::keyboard_code_to_vk(&code) {
+            return trigger_key_is_physically_down(vk);
+        }
+    }
+
+    false
+}
+
+/// watchdog による確定リリース判定の純粋関数。トリガーが `grace_ms` 以上連続して
+/// 物理的に離され続けているときのみ true。通常リリース経路（120ms）より長い猶予を
+/// 使うことで、正常経路が先にセッションを終了する余地を残し、watchdog による
+/// 早期送出（=誤ったアクション発火）を決して起こさない。
+fn release_confirmed_by_watchdog(continuous_release_ms: u64, grace_ms: u64) -> bool {
+    continuous_release_ms >= grace_ms
+}
+
+/// アクティブなセッションを監視する watchdog スレッドを起動する。通常リリース経路
+/// （button-up/key-up イベント → complete_gesture）がイベント取りこぼし・順序崩れ・
+/// 重複によって発火しなかった場合でも、トリガーが物理的に離され続けて猶予を超えたら
+/// centralized のキャンセル経路（cancel_active_gesture_session、アクション非送出）で
+/// セッションを必ず終了させ、「トリガーを離したのにセッションが stuck する」状態を
+/// 解消する。セッションが正常終了（IS_DRAGGING=false / 世代変化 / 無効化）したら即終了する。
+fn spawn_session_watchdog(config: crate::config::Config, slot: String, generation: u64) {
+    std::thread::spawn(move || {
+        let mut continuous_release_ms: u64 = 0;
+        loop {
+            std::thread::sleep(Duration::from_millis(WATCHDOG_POLL_MS));
+
+            if !crate::is_gesture_enabled_internal() {
+                return;
+            }
+            if *SESSION_GENERATION.lock().unwrap() != generation {
+                return;
+            }
+            if !*IS_DRAGGING.lock().unwrap() {
+                return;
+            }
+            if ACTIVE_TRIGGER_SLOT.lock().unwrap().as_deref() != Some(slot.as_str()) {
+                return;
+            }
+
+            if trigger_physically_held(&config, &slot) {
+                continuous_release_ms = 0;
+                continue;
+            }
+
+            continuous_release_ms += WATCHDOG_POLL_MS;
+            if release_confirmed_by_watchdog(continuous_release_ms, WATCHDOG_RELEASE_GRACE_MS) {
+                diag_log(format!(
+                    "watchdog: trigger physically released for >= {}ms but session still active; cancelling stuck session slot={} generation={}",
+                    WATCHDOG_RELEASE_GRACE_MS, slot, generation
+                ));
+                cancel_active_gesture_session();
+                return;
+            }
+        }
+    });
 }
 
 /// CapsLock のトグル状態（GetKeyState 下位ビット）を返す。
@@ -911,7 +1030,12 @@ unsafe extern "system" fn mouse_hook_proc(
                         }
                     }
 
-                    begin_gesture(&config, slot, point, current_window);
+                    // ジェスチャー開始時にレンダラーの生存を保証する（破棄/停止して
+                    // いたら冪等に再生成）。フックスレッドからはノンブロッキングで呼ぶ。
+                    crate::trajectory_renderer::ensure_renderer_alive();
+                    let generation = begin_gesture(&config, slot, point, current_window);
+                    // リリースイベント取りこぼしによる stuck セッションの安全網。
+                    spawn_session_watchdog(config.clone(), slot.to_string(), generation);
                     return LRESULT(1);
                 } else {
                     diag_log("trigger match: none");
@@ -1130,10 +1254,15 @@ unsafe extern "system" fn keyboard_hook_proc(
                             }
                         }
 
-                        begin_gesture(&config, slot, point, current_window);
+                        // ジェスチャー開始時にレンダラーの生存を保証する（破棄/停止して
+                        // いたら冪等に再生成）。フックスレッドからはノンブロッキングで呼ぶ。
+                        crate::trajectory_renderer::ensure_renderer_alive();
+                        let generation = begin_gesture(&config, slot, point, current_window);
                         if dedicated_slot == Some(slot) {
                             KEYBOARD_RELEASE_STATE.lock().unwrap().begin(vk_code);
                         }
+                        // リリースイベント取りこぼしによる stuck セッションの安全網。
+                        spawn_session_watchdog(config.clone(), slot.to_string(), generation);
                     } else {
                         diag_log("keyboard trigger match: none");
                     }
@@ -2000,5 +2129,113 @@ mod tests {
         // could plausibly emit by coincidence (most tools leave dwExtraInfo
         // at 0 or their own vendor-specific constant).
         assert_ne!(SELF_INPUT_MARKER, 0);
+    }
+
+    // --- Stuck-session watchdog (release-event loss recovery) ---
+    //
+    // Root cause of "gesture session stays active after trigger release": the
+    // low-level hook can miss/reorder/duplicate the button-up/key-up event
+    // (load, secure desktop, display change, hook restart), so the normal
+    // release path never runs and IS_DRAGGING stays true forever. The watchdog
+    // polls the *physical* trigger state and cancels (never dispatches) a
+    // session whose trigger has been physically released past a grace window.
+
+    #[test]
+    fn release_confirmed_by_watchdog_only_after_grace_elapsed() {
+        assert!(!release_confirmed_by_watchdog(0, WATCHDOG_RELEASE_GRACE_MS));
+        assert!(!release_confirmed_by_watchdog(
+            WATCHDOG_RELEASE_GRACE_MS - 1,
+            WATCHDOG_RELEASE_GRACE_MS
+        ));
+        assert!(release_confirmed_by_watchdog(
+            WATCHDOG_RELEASE_GRACE_MS,
+            WATCHDOG_RELEASE_GRACE_MS
+        ));
+        assert!(release_confirmed_by_watchdog(
+            WATCHDOG_RELEASE_GRACE_MS + WATCHDOG_POLL_MS,
+            WATCHDOG_RELEASE_GRACE_MS
+        ));
+    }
+
+    #[test]
+    fn watchdog_grace_is_strictly_longer_than_normal_release_grace() {
+        // The normal release path (120 ms confirmed release) must always get the
+        // first chance to terminate (and dispatch) a genuine release. The watchdog
+        // is only a backstop for missed events, so its grace must be strictly
+        // longer; otherwise it could pre-empt the normal path and either cancel a
+        // legitimate gesture or cause premature behavior.
+        assert!(WATCHDOG_RELEASE_GRACE_MS > TRIGGER_RELEASE_GRACE_MS);
+    }
+
+    #[test]
+    fn trigger_physically_held_is_false_and_panic_free_when_nothing_pressed() {
+        // Cannot simulate a physically-held trigger in CI, but this proves the
+        // watchdog's physical-state probe is bounded: for mouse and keyboard
+        // triggers alike it returns false (nothing held) and never panics.
+        let config = config_with_triggers("mouse:right", "key:KeyZ", "mouse:x1");
+        assert!(!trigger_physically_held(&config, "A"));
+        assert!(!trigger_physically_held(&config, "B"));
+        assert!(!trigger_physically_held(&config, "C"));
+    }
+
+    #[test]
+    fn trigger_physically_held_returns_false_for_unassigned_or_unknown_trigger() {
+        // An unassigned slot (normalized to the "unassigned" sentinel) or a
+        // trigger that resolves to no VK must be treated as "not held" rather
+        // than panicking, so the watchdog can never get stuck on a bad config.
+        let config = config_with_triggers("mouse:middle", "mouse:x1", "mouse:x2");
+        // Slot A here is "mouse:middle"; a slot whose button is not right/middle/
+        // x1/x2 (e.g. a malformed value) falls through to false by construction.
+        assert!(!trigger_physically_held(&config, "A"));
+    }
+
+    #[test]
+    fn session_generation_advances_on_begin_complete_and_cancel() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        // Use a middle-click trigger so complete_gesture neither recognizes a
+        // gesture nor replays a right-click (no synthetic input in tests).
+        let config = config_with_triggers("mouse:middle", "mouse:x1", "mouse:x2");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *GESTURE_START_WINDOW.lock().unwrap() = None;
+
+        let before = *SESSION_GENERATION.lock().unwrap();
+        let begin_gen = begin_gesture(&config, "A", POINT { x: 1, y: 1 }, HWND::default());
+        assert_eq!(begin_gen, *SESSION_GENERATION.lock().unwrap());
+        assert_ne!(begin_gen, before);
+
+        complete_gesture(&config, "A");
+        let after_complete = *SESSION_GENERATION.lock().unwrap();
+        assert_ne!(after_complete, begin_gen);
+
+        let begin_gen2 = begin_gesture(&config, "A", POINT { x: 2, y: 2 }, HWND::default());
+        assert_ne!(begin_gen2, after_complete);
+        cancel_active_gesture_session();
+        assert_ne!(*SESSION_GENERATION.lock().unwrap(), begin_gen2);
+    }
+
+    #[test]
+    fn watchdog_cancel_uses_centralized_teardown_that_never_dispatches() {
+        // The watchdog terminates a stuck session exclusively through
+        // cancel_active_gesture_session, which is already proven idempotent and
+        // dispatch-free. This test pins the contract the watchdog relies on:
+        // after the watchdog-style cancel, no session state survives and a stale
+        // confirmed-release callback for that session can no longer dispatch.
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:middle", "mouse:x1", "mouse:x2");
+
+        let generation = begin_gesture(&config, "A", POINT { x: 9, y: 9 }, HWND::default());
+        assert!(*IS_DRAGGING.lock().unwrap());
+
+        // Simulate the watchdog firing: centralized cancel, no dispatch.
+        cancel_active_gesture_session();
+
+        assert!(!*IS_DRAGGING.lock().unwrap());
+        assert!(ACTIVE_TRIGGER_SLOT.lock().unwrap().is_none());
+        assert!(TRAJECTORY.lock().unwrap().is_empty());
+        // The generation the watchdog captured is now stale.
+        assert_ne!(*SESSION_GENERATION.lock().unwrap(), generation);
     }
 }

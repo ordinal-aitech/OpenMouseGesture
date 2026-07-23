@@ -16,7 +16,18 @@
 //     ずっとoriginとサイズが固定されるため、バウンディング拡大に伴う
 //     ウィンドウの再配置・ビットマップ再確保による「既に描画済みの軌跡が
 //     一瞬ずれる」現象が構造的に発生し得ない。
+//   - 例外的に、ジェスチャー開始の立ち上がりエッジでのみ SetWindowPos を
+//     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE で呼び、origin/サイズ/アクティブ
+//     ウィンドウを一切変えずに TOPMOST バンドの最上位だけを再主張する。
+//     これにより、オーバーレイ生成後に最前面へ昇格したフルスクリーン/
+//     ボーダーレスウィンドウの上にも軌跡を表示できる（z-orderのみの操作なので
+//     上記の「ずれ」不変条件は維持される）。
+//   - ウィンドウはプロセス生存中ずっと表示状態を保ち、「軌跡なし」は
+//     全面透明フレーム（アルファ0）で表現する。ShowWindow の表示/非表示切替を
+//     廃止したことで、フルスクリーン相当のウィンドウに対する ShowWindow 遷移が
+//     DWM合成を揺らし、フォアグラウンド背後のウィンドウが一瞬露出する現象を抑制する。
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -56,6 +67,18 @@ static MASK_BITMAP_CORE: Mutex<Option<isize>> = Mutex::new(None);
 static LAST_RENDER_TIME: Mutex<Option<Instant>> = Mutex::new(None);
 static ACTIVE_LINE_COLOR: Mutex<u32> = Mutex::new(0x004F4DFF);
 
+// --- レンダラー自己回復とオーバーレイ可視状態の管理 ---
+// RENDERER_ALIVE はレンダラースレッドがウィンドウを生成してメッセージループを
+// 回している間だけ true。スレッドが終了する（ウィンドウが破棄される）と false に
+// 戻る。RENDERER_SPAWNING は生成処理が進行中の間だけ true で、回復経路が同時に
+// 複数のスレッド/ウィンドウを生成してリークすることを防ぐ（直列化ガード）。
+// OVERLAY_VISIBLE は「今この瞬間に軌跡を表示しているか」の論理状態で、
+// 最前面再主張（assert_topmost）を表示開始の立ち上がりエッジで一度だけ行うために使う。
+static RENDERER_ALIVE: AtomicBool = AtomicBool::new(false);
+static RENDERER_SPAWNING: AtomicBool = AtomicBool::new(false);
+static RENDERER_INIT_LOCK: Mutex<()> = Mutex::new(());
+static OVERLAY_VISIBLE: Mutex<bool> = Mutex::new(false);
+
 const WINDOW_CLASS_NAME: PCWSTR = w!("OpenMouseGestureTrajectory");
 
 // 旧実装の単色フラットライン(幅3, 完全不透明)に対する新レイヤー幅。
@@ -84,21 +107,30 @@ const MIN_FRAME_INTERVAL_MS: u64 = 16;
 // 修正方針: ジェスチャーごとにウィンドウを可変にすることをやめ、起動時に
 // 仮想デスクトップ全体を覆う固定originの単一ウィンドウを一度だけ作成する。
 // 以後はプロセスの生存期間中、SetWindowPosによる移動・リサイズを一切行わない
-// (表示/非表示の切替と再描画のみ)。これにより、ジェスチャーがどれだけ
-// 大きく/どの方向に転じても、ウィンドウのorigin・サイズ・ローカル座標変換は
+// (再描画と、立ち上がりエッジでのz-order再主張のみ)。これにより、ジェスチャーが
+// どれだけ大きく/どの方向に転じても、ウィンドウのorigin・サイズ・ローカル座標変換は
 // 一切変化しようがない。
 
 unsafe fn clear_dc(dc: HDC, width: i32, height: i32) {
     let _ = PatBlt(dc, 0, 0, width, height, BLACKNESS);
 }
 
-unsafe fn clear_memory_dc() {
-    let mem_dc_opt = MEMORY_DC.lock().unwrap();
-    if let Some(mem_dc_val) = *mem_dc_opt {
-        let mem_dc = HDC(mem_dc_val as *mut _);
-        let (width, height) = *WINDOW_SIZE.lock().unwrap();
-        clear_dc(mem_dc, width, height);
-    }
+// オーバーレイを TOPMOST バンドの最上位に再主張する。SWP_NOMOVE | SWP_NOSIZE により
+// origin/サイズは一切変更せず（=固定スクリーン空間の不変条件を維持）、SWP_NOACTIVATE
+// によりフォーカス/アクティブウィンドウも奪わない。他のウィンドウの整列・活性化・
+// 露出は行わず、単に自ウィンドウを最前面帯域の先頭へ持ち上げるだけである。
+// フルスクリーン/ボーダーレスのアプリがオーバーレイ生成後に最前面へ昇格した場合でも、
+// ジェスチャー開始時にこれを呼ぶことで軌跡をその上に表示できる。
+unsafe fn assert_topmost(hwnd: HWND) {
+    let _ = SetWindowPos(
+        hwnd,
+        Some(HWND_TOPMOST),
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+    );
 }
 
 // 指定サイズのARGB32 DIBセクションを作成し、compatible DCに選択する
@@ -411,22 +443,34 @@ unsafe extern "system" fn window_proc(
     match msg {
         WM_UPDATE_TRAJECTORY => {
             let visible = wparam.0 != 0;
-            if visible {
-                // ウィンドウのorigin/サイズは起動時に確定した仮想デスクトップ全体で
-                // 不変のため、ここでは点列のスナップショットを取って同じ固定originで
-                // 再描画するだけでよい。ウィンドウの移動・リサイズは一切発生しない。
-                let snapshot_points = {
-                    let state = TRAJECTORY_STATE.lock().unwrap();
-                    state.points.clone()
-                };
+            // ウィンドウのorigin/サイズは起動時に確定した仮想デスクトップ全体で不変の
+            // ため、点列のスナップショットを同じ固定originで再描画するだけでよい。
+            // ウィンドウはプロセス生存中ずっと表示状態を保ち、「軌跡なし」は全面透明
+            // フレーム（点列が空/2点未満なら render 側がアルファ0のフレームを生成）で
+            // 表現する。フレームごとの ShowWindow 表示/非表示切替は行わない（DWM合成を
+            // 揺らしてフォアグラウンド背後のウィンドウを露出させる原因だったため）。
+            let snapshot_points = {
+                let state = TRAJECTORY_STATE.lock().unwrap();
+                state.points.clone()
+            };
 
-                render_to_memory_dc_with_snapshot(snapshot_points);
-                update_layered_window_from_memory(hwnd);
-                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            render_to_memory_dc_with_snapshot(snapshot_points);
+            update_layered_window_from_memory(hwnd);
+
+            let mut overlay_visible = OVERLAY_VISIBLE.lock().unwrap();
+            if visible {
+                if !*overlay_visible {
+                    // 表示の立ち上がりエッジでのみ: 外部要因で非表示にされていた場合だけ
+                    // 再表示し、TOPMOST バンドの最上位を再主張する。z-orderのみの操作で、
+                    // アクティブウィンドウの奪取・他ウィンドウの整列/露出は行わない。
+                    if !IsWindowVisible(hwnd).as_bool() {
+                        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    }
+                    assert_topmost(hwnd);
+                }
+                *overlay_visible = true;
             } else {
-                clear_memory_dc();
-                update_layered_window_from_memory(hwnd);
-                let _ = ShowWindow(hwnd, SW_HIDE);
+                *overlay_visible = false;
             }
             LRESULT(0)
         }
@@ -454,8 +498,26 @@ unsafe extern "system" fn window_proc(
     }
 }
 
-pub fn init_renderer() -> Result<()> {
+// レンダラースレッドの生存期間ガード。スレッドが正常終了・パニックのいずれで
+// 終わっても Drop で RENDERER_ALIVE/RENDERER_SPAWNING を false に戻す。これにより
+// 「スレッドは死んでいるのに生存フラグだけ true のまま回復不能になる」状態や、
+// 「生成中のフラグが stuck して二度と回復できなくなる」状態を防ぐ。
+struct RendererLifetimeGuard;
+
+impl Drop for RendererLifetimeGuard {
+    fn drop(&mut self) {
+        RENDERER_ALIVE.store(false, Ordering::SeqCst);
+        RENDERER_SPAWNING.store(false, Ordering::SeqCst);
+    }
+}
+
+// オーバーレイウィンドウとメッセージループを別スレッドに生成する（非ブロッキング）。
+// 起動時と自己回復時の両方から呼ばれる。ウィンドウは生成直後に全面透明フレームで
+// 表示状態に入り（SW_SHOWNOACTIVATE + topmost）、以後プロセス生存中ずっと表示を保つ。
+fn spawn_renderer_thread() {
     std::thread::spawn(|| unsafe {
+        let _guard = RendererLifetimeGuard;
+
         let hinstance = HINSTANCE::default();
 
         let wc = WNDCLASSEXW {
@@ -469,11 +531,13 @@ pub fn init_renderer() -> Result<()> {
             ..Default::default()
         };
 
+        // 回復時に同一クラスが登録済みでも CreateWindowExW は既存クラスを使うため、
+        // 登録失敗（クラス重複）は無害。戻り値は意図的に検査しない。
         RegisterClassExW(&wc);
 
         // 仮想デスクトップ全体を覆う固定originのウィンドウを一度だけ作成する。
         // 以後プロセスの生存期間中、このoriginとサイズは二度と変更しない
-        // (SetWindowPosは本ファイルのどこからも呼ばれない)。
+        // (移動・リサイズを伴う SetWindowPos は呼ばない)。
         let virtual_x = GetSystemMetrics(SM_XVIRTUALSCREEN);
         let virtual_y = GetSystemMetrics(SM_YVIRTUALSCREEN);
         let virtual_width = GetSystemMetrics(SM_CXVIRTUALSCREEN).max(1);
@@ -497,6 +561,8 @@ pub fn init_renderer() -> Result<()> {
 
         if hwnd == HWND::default() {
             eprintln!("[TRAJECTORY_RENDERER] ERROR: Failed to create window");
+            // ガードの Drop で SPAWNING が false に戻るため、次回ジェスチャー開始時に
+            // ensure_renderer_alive が再試行できる（永久に回復不能にはならない）。
             return;
         }
 
@@ -539,19 +605,106 @@ pub fn init_renderer() -> Result<()> {
             *MASK_BITMAP_CORE.lock().unwrap() = Some(core_bitmap.0 as isize);
         }
 
-        clear_memory_dc();
+        // 初期フレームは全面透明（点列空）で表示状態に入る。ShowWindow による
+        // 表示/非表示切替は以後行わず、「軌跡なし」はこの透明フレームで表現する。
+        render_to_memory_dc_with_snapshot(Vec::new());
         update_layered_window_from_memory(hwnd);
-        let _ = ShowWindow(hwnd, SW_HIDE);
+        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+        assert_topmost(hwnd);
+        *OVERLAY_VISIBLE.lock().unwrap() = false;
+
+        // ウィンドウが完全に準備できた時点で生存を宣言する。
+        RENDERER_ALIVE.store(true, Ordering::SeqCst);
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-    });
 
+        // メッセージループ終了（WM_DESTROY -> WM_QUIT）後: DC/ビットマップは WM_DESTROY
+        // 内で解放済みなので、ここでは静的ハンドルを None に戻して次回生成に備えるだけ
+        // （二重解放はしない）。ガードの Drop で ALIVE/SPAWNING も false になる。
+        *RENDERER_HWND.lock().unwrap() = None;
+        *OVERLAY_VISIBLE.lock().unwrap() = false;
+        *MEMORY_DC.lock().unwrap() = None;
+        *MEMORY_BITMAP.lock().unwrap() = None;
+        *MASK_DC_GLOW.lock().unwrap() = None;
+        *MASK_BITMAP_GLOW.lock().unwrap() = None;
+        *MASK_DC_BODY.lock().unwrap() = None;
+        *MASK_BITMAP_BODY.lock().unwrap() = None;
+        *MASK_DC_CORE.lock().unwrap() = None;
+        *MASK_BITMAP_CORE.lock().unwrap() = None;
+    });
+}
+
+// レンダラーが生存し、有効なウィンドウを持っているかを返す。回復要不要の判定に使う。
+fn renderer_is_healthy() -> bool {
+    if !RENDERER_ALIVE.load(Ordering::SeqCst) {
+        return false;
+    }
+    match *RENDERER_HWND.lock().unwrap() {
+        Some(h) => unsafe { IsWindow(Some(HWND(h as *mut _))).as_bool() },
+        None => false,
+    }
+}
+
+// 回復のためにレンダラースレッドを新規生成すべきかを判定する純粋関数。
+// 既に正常(healthy)、または生成中(spawning)のいずれかなら生成しない。
+// 重複生成はウィンドウ/スレッド/メッセージループのリークになるため、ここで必ず抑止する。
+fn should_spawn_renderer(healthy: bool, spawning: bool) -> bool {
+    !healthy && !spawning
+}
+
+// レンダラーが死んでいれば（ウィンドウ破棄・スレッド終了・非表示化など）冪等に再生成する。
+// 既に生存中、または生成処理が進行中の場合は何もしない（重複ウィンドウ/スレッド/
+// メッセージループのリークを防ぐ）。ノンブロッキングで、フックスレッドを長時間塞がない。
+// 生成は非同期のため、回復直後の最初のフレームはウィンドウ準備が間に合わず落ちる場合が
+// あるが、点列は TRAJECTORY_STATE に蓄積され続けるため、準備完了後の次フレームで
+// 軌跡全体が描画される（=アプリ再起動なしで後続ジェスチャーが正常描画に戻る）。
+pub fn ensure_renderer_alive() {
+    if renderer_is_healthy() {
+        return;
+    }
+    let _guard = RENDERER_INIT_LOCK.lock().unwrap();
+    let healthy = renderer_is_healthy();
+    let spawning = RENDERER_SPAWNING.load(Ordering::SeqCst);
+    if !should_spawn_renderer(healthy, spawning) {
+        return;
+    }
+    RENDERER_SPAWNING.store(true, Ordering::SeqCst);
+    spawn_renderer_thread();
+}
+
+pub fn init_renderer() -> Result<()> {
+    ensure_renderer_alive();
+    // 起動直後の最初のジェスチャーにオーバーレイが間に合うよう、ウィンドウ生成の
+    // 完了を短時間だけ待つ（回復経路の ensure_renderer_alive はノンブロッキング）。
     std::thread::sleep(std::time::Duration::from_millis(100));
     Ok(())
+}
+
+// レンダラースレッドへ描画要求を送る共通経路。ウィンドウが存在しなければ
+// （レンダラー未起動/破棄直後/回復中）そのフレームは安全に破棄される。点列は
+// TRAJECTORY_STATE に蓄積され続けるため、ウィンドウ回復後の次フレームで全体が描画される。
+// ここで ensure_renderer_alive を呼ばないのは、単体テストがネイティブウィンドウを
+// 生成しないよう、回復の引き金をジェスチャー開始時（mouse_hook 側）に集約しているため。
+fn post_render_message(visible: bool) {
+    let hwnd = {
+        let renderer_hwnd = RENDERER_HWND.lock().unwrap();
+        renderer_hwnd.map(|h| HWND(h as *mut _))
+    };
+
+    if let Some(hwnd) = hwnd {
+        unsafe {
+            let _ = PostMessageW(
+                Some(hwnd),
+                WM_UPDATE_TRAJECTORY,
+                WPARAM(visible as usize),
+                LPARAM(0),
+            );
+        }
+    }
 }
 
 pub fn update_trajectory(points: &[(i32, i32)], visible: bool) {
@@ -580,22 +733,8 @@ pub fn update_trajectory(points: &[(i32, i32)], visible: bool) {
     };
 
     if should_render {
-        let hwnd = {
-            let renderer_hwnd = RENDERER_HWND.lock().unwrap();
-            renderer_hwnd.map(|h| HWND(h as *mut _))
-        };
-
-        if let Some(hwnd) = hwnd {
-            // レンダラースレッドに通知（描画はwindow_procで集約）
-            unsafe {
-                let _ = PostMessageW(
-                    Some(hwnd),
-                    WM_UPDATE_TRAJECTORY,
-                    WPARAM(if visible { 1 } else { 0 }),
-                    LPARAM(0),
-                );
-            }
-        }
+        // レンダラースレッドに通知（描画はwindow_procで集約）
+        post_render_message(visible);
     }
 }
 
@@ -620,16 +759,7 @@ pub fn append_trajectory_point(x: i32, y: i32) {
         *last_time = Some(now);
         drop(last_time);
 
-        let hwnd = {
-            let renderer_hwnd = RENDERER_HWND.lock().unwrap();
-            renderer_hwnd.map(|h| HWND(h as *mut _))
-        };
-
-        if let Some(hwnd) = hwnd {
-            unsafe {
-                let _ = PostMessageW(Some(hwnd), WM_UPDATE_TRAJECTORY, WPARAM(1), LPARAM(0));
-            }
-        }
+        post_render_message(true);
     }
 }
 
@@ -640,16 +770,7 @@ pub fn clear_trajectory_display() {
         state.visible = false;
     }
 
-    let hwnd = {
-        let renderer_hwnd = RENDERER_HWND.lock().unwrap();
-        renderer_hwnd.map(|h| HWND(h as *mut _))
-    };
-
-    if let Some(hwnd) = hwnd {
-        unsafe {
-            let _ = PostMessageW(Some(hwnd), WM_UPDATE_TRAJECTORY, WPARAM(0), LPARAM(0));
-        }
-    }
+    post_render_message(false);
 }
 
 pub fn set_active_color(hex_color: &str) {
@@ -720,7 +841,8 @@ mod tests {
     // --- 固定スクリーン空間アーキテクチャのテスト ---
     // ウィンドウのorigin/サイズは起動時(init_renderer)に仮想デスクトップ全体で
     // 一度だけ確定し、以後プロセスの生存期間中不変であることが前提。
-    // 本ファイルにはSetWindowPos呼び出しが一切存在しない(grepで確認可能)ため、
+    // 本ファイルの SetWindowPos は z-order 再主張(SWP_NOMOVE|SWP_NOSIZE)のみに使い、
+    // 移動・リサイズを伴う呼び出しは存在しない(grepで確認可能)ため、
     // ここではその不変条件のもとで座標変換・状態管理が正しく振る舞うことを検証する。
 
     fn reset_state_for_test() {
@@ -830,5 +952,86 @@ mod tests {
     fn rgb_from_colorref_roundtrips_hex_regression() {
         let (r, g, b) = rgb_from_colorref(0x00112233);
         assert_eq!((r, g, b), (0x33, 0x22, 0x11));
+    }
+
+    // --- レンダラー自己回復の判定ロジック ---
+
+    #[test]
+    fn should_spawn_renderer_only_when_unhealthy_and_not_spawning() {
+        // 重複生成（=ウィンドウ/スレッド/メッセージループのリーク）を防ぐため、
+        // 生成は「未生存 かつ 非生成中」のときだけ許可される。
+        assert!(should_spawn_renderer(false, false));
+        assert!(!should_spawn_renderer(true, false));
+        assert!(!should_spawn_renderer(false, true));
+        assert!(!should_spawn_renderer(true, true));
+    }
+
+    #[test]
+    fn renderer_is_unhealthy_when_not_alive() {
+        // 単体テスト環境ではレンダラースレッドを起動しないため RENDERER_ALIVE は false。
+        // このとき renderer_is_healthy は必ず false を返さなければならない
+        // （=回復経路が「生存している」と誤判定して回復をスキップしない）。
+        // ※ ensure_renderer_alive 自体はネイティブウィンドウを生成するためテストでは呼ばない。
+        RENDERER_ALIVE.store(false, Ordering::SeqCst);
+        assert!(!renderer_is_healthy());
+    }
+
+    // --- ネイティブウィンドウ構成（透明・クリックスルー・非活性化・最前面）---
+    // 物理フルスクリーンの合成挙動は CI では検証できないため、ここではオーバーレイが
+    // 入力透明・クリック通過・非活性化・最前面・ツールウィンドウの拡張スタイルで生成され、
+    // 最前面再主張が z-order 限定（移動/リサイズ/活性化なし）であること、そして
+    // ShowWindow による非表示化（SW_HIDE）を廃止した always-shown 構成であることを
+    // ソース構造として固定する。物理検証は CHANGELOG の「要・実機確認」項目を参照。
+
+    #[test]
+    fn overlay_window_uses_nonactivating_clickthrough_topmost_toolwindow_styles() {
+        let src = include_str!("trajectory_renderer.rs");
+        // WS_EX_TOOLWINDOW を含む行で絞り込むことで、拡張スタイルを列挙するだけの
+        // ヘッダコメントではなく CreateWindowExW の実際の実装行を特定する。
+        let style_line = src
+            .lines()
+            .find(|l| l.contains("WS_EX_LAYERED") && l.contains("WS_EX_TOOLWINDOW"))
+            .expect("overlay CreateWindowExW extended-style line must exist");
+        assert!(style_line.contains("WS_EX_TOPMOST"), "must stay topmost");
+        assert!(
+            style_line.contains("WS_EX_NOACTIVATE"),
+            "must never activate/steal focus"
+        );
+        assert!(
+            style_line.contains("WS_EX_TRANSPARENT"),
+            "must remain input-transparent (click-through)"
+        );
+    }
+
+    #[test]
+    fn topmost_reassert_is_zorder_only_without_move_size_or_activate() {
+        // 検索トークンは動的に組み立てる（include_str! がこのテスト自身のソースも取り込む
+        // ため、リテラルをそのまま contains すると自己参照で常に真になってしまう）。
+        let src = include_str!("trajectory_renderer.rs");
+        let topmost_target = format!("Some({})", "HWND_TOPMOST");
+        let zorder_only_flags = format!("{} | {} | {}", "SWP_NOMOVE", "SWP_NOSIZE", "SWP_NOACTIVATE");
+        assert!(
+            src.contains(&topmost_target),
+            "topmost re-assert must target the TOPMOST band"
+        );
+        assert!(
+            src.contains(&zorder_only_flags),
+            "topmost re-assert must not move, resize, or activate (preserves the fixed-origin invariant)"
+        );
+    }
+
+    #[test]
+    fn overlay_no_longer_hides_via_showwindow_to_avoid_background_exposure() {
+        // always-shown 構成: 「軌跡なし」は全面透明フレームで表現し、ShowWindow による
+        // 非表示化は行わない。フルスクリーン相当ウィンドウに対する ShowWindow 遷移が
+        // DWM 合成を揺らして背後ウィンドウを露出させる経路を断つため。
+        // 検索トークンは動的に組み立てる（include_str! がこのテスト自身のソースも取り込む
+        // ため、リテラルをそのまま書くと自己参照で必ず失敗する）。
+        let src = include_str!("trajectory_renderer.rs");
+        let hide_call = format!("ShowWindow(hwnd, {})", "SW_HIDE");
+        assert!(
+            !src.contains(&hide_call),
+            "the overlay must never be hidden via ShowWindow with the hide flag"
+        );
     }
 }

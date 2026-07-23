@@ -12,8 +12,12 @@ Historical work logs, superseded plans, temporary reports, and obsolete verifica
 
 - Active source: `source-v1.0.1/7-rate-OpenMouseGesture-b8f5357/`
 - Stable Windows installer handoff: `dist/windows/OpenMouseGesture-Setup-x64.exe`
-- Current application baseline: commit `0458aeb`
-- The current mouse-gesture repair cycle is complete for practical use.
+- Last physically verified application baseline: commit `0458aeb` (July 21 repair cycle).
+- A subsequent repair cycle implemented overlay z-order/fullscreen handling, renderer
+  self-recovery, and stuck-session release recovery (see `CHANGELOG.md` 2026-07-23).
+  These changes pass the automated build and test suite but still require human
+  physical verification on the target machine before they are treated as verified
+  behavior.
 - The user will continue validating the application during normal operation and reopen work only if another material defect is found.
 
 ## Verified User Behavior
@@ -68,6 +72,42 @@ Special-key behavior has varied across builds. Only keys whose capture and trigg
 - Cancellation must never dispatch an action.
 - Disable, shutdown, settings changes, hook restart, and unrecoverable session errors must use the centralized idempotent teardown path.
 - No change may reintroduce a permanently stuck red trajectory or active session.
+- A per-session release watchdog polls the physical trigger state and terminates a
+  session whose trigger has been physically released past a grace window, even when
+  the button-up/key-up event was missed, reordered, or duplicated. The watchdog uses
+  the centralized cancel path and never dispatches an action. Its grace (300 ms) is
+  longer than the 120 ms confirmed-release window so the normal release path always
+  terminates, and dispatches, a genuine release first.
+
+## Trajectory Overlay Behavior
+
+- The trajectory is drawn on a single native layered window covering the whole virtual
+  desktop, created once at startup with
+  `WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`.
+- The overlay is input-transparent and click-through, never activates or focuses, does
+  not appear in the taskbar, and must not reorder, expose, or interfere with foreground
+  or background applications.
+- The overlay stays shown for the process lifetime; "no trajectory" is a fully
+  transparent frame rather than a hidden window. This avoids `ShowWindow` show/hide
+  transitions that can make the compositor briefly expose windows behind the foreground
+  application while drawing.
+- At gesture start the overlay re-asserts the top of the TOPMOST band using a
+  z-order-only `SetWindowPos` (`SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE`), so the
+  trajectory appears above fullscreen/borderless windows that raised themselves after
+  startup. The window's origin and size never change.
+- If the overlay window or its render thread is lost, destroyed, or hidden, the next
+  gesture start recreates it automatically (bounded and idempotent; no duplicate
+  windows, hooks, or render loops). Trajectory rendering recovers without restarting
+  the whole application.
+
+### Fullscreen limitation
+
+- Non-exclusive fullscreen and borderless-fullscreen windows can be overlaid, and the
+  trajectory is re-asserted above them at gesture start.
+- Exclusive fullscreen (Direct3D exclusive mode / hardware overlay) bypasses the desktop
+  compositor and cannot be overlaid by any non-exclusive window. Trajectory visibility
+  over exclusive-fullscreen applications is a Windows platform limitation, not a defect
+  fixable at the overlay layer.
 
 ## Tray and Window Behavior
 
