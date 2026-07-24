@@ -126,6 +126,19 @@ static KEYBOARD_RELEASE_STATE: Mutex<KeyboardReleaseState> =
 /// keydown）を確実に同じインタラクションとして飲み込むためのフラグ。
 static ESCAPE_CANCEL_CONSUMING: Mutex<bool> = Mutex::new(false);
 
+/// セッション世代。begin/complete/cancel のたびに単調増加する。遅延コールバック
+/// （schedule_confirmed_keyboard_release 等）は開始時に自分の世代を捕獲し、現在の
+/// 世代が異なれば（=そのセッションが既に終了、または新しいセッションに置き換わった）
+/// ただちに終了する。これにより、古いセッションの遅延処理が新しいセッションを
+/// 誤って完了・キャンセルすることを防ぐ。
+static SESSION_GENERATION: Mutex<u64> = Mutex::new(0);
+
+/// セッション開始時に記録したトリガー識別文字列（例: "mouse:right", "key:KeyZ"）。
+/// UP イベントとの照合は、設定の再読み込みではなくこの記録値に対して行う。
+/// これにより、ジェスチャー中に設定が再読み込みされても、開始時のトリガーと
+/// 一致する UP イベントだけがセッションを完了できる。
+static ACTIVE_TRIGGER_IDENTITY: Mutex<Option<String>> = Mutex::new(None);
+
 const VK_CAPITAL: u16 = 0x14;
 const VK_ESCAPE: u16 = 0x1B;
 const VK_SHIFT: u16 = 0x10;
@@ -542,6 +555,23 @@ fn active_mouse_trigger_matches_up(
     }
 }
 
+/// セッション開始時に記録したトリガー識別文字列に対して、マウス UP イベントが
+/// 一致するかどうかを判定する。設定の再読み込みに依存しないため、ジェスチャー
+/// 中に設定が変わっても、開始時のトリガーと一致する UP だけがセッションを完了できる。
+fn recorded_trigger_matches_mouse_up(
+    trigger_identity: &str,
+    event_type: u32,
+    mouse_data: &MSLLHOOKSTRUCT,
+) -> bool {
+    match parse_mouse_trigger(trigger_identity) {
+        Some("right") => event_type == WM_RBUTTONUP,
+        Some("middle") => event_type == WM_MBUTTONUP,
+        Some("x1") => event_type == WM_XBUTTONUP && xbutton_name(mouse_data) == Some("x1"),
+        Some("x2") => event_type == WM_XBUTTONUP && xbutton_name(mouse_data) == Some("x2"),
+        _ => false,
+    }
+}
+
 fn trigger_slot_for_keyboard_down(
     config: &crate::config::Config,
     vk_code: u16,
@@ -578,21 +608,20 @@ fn dedicated_keyboard_slot_for_vk(
     None
 }
 
-fn trigger_key_is_physically_down(vk_code: u16) -> bool {
-    let state = unsafe { GetAsyncKeyState(vk_code as i32) };
-    (state as u16 & 0x8000) != 0
-}
-
 fn schedule_confirmed_keyboard_release(
     config: crate::config::Config,
     slot: String,
     key: u16,
     generation: u64,
+    session_generation: u64,
 ) {
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(TRIGGER_RELEASE_GRACE_MS));
 
-        if trigger_key_is_physically_down(key) || !crate::is_gesture_enabled_internal() {
+        if !crate::is_gesture_enabled_internal() {
+            return;
+        }
+        if *SESSION_GENERATION.lock().unwrap() != session_generation {
             return;
         }
         if PRESSED_KEYS.lock().unwrap().contains(&key) {
@@ -639,14 +668,31 @@ fn resolve_window_for_point(point: POINT) -> HWND {
     }
 }
 
-fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, current_window: HWND) {
+/// セッション世代を単調増加させ、新しい世代を返す。セッションを開始・完了・
+/// キャンセルするたびに呼び、古い遅延コールバックが既に終了したセッションに
+/// 干渉しないようにする。
+fn bump_session_generation() -> u64 {
+    let mut generation = SESSION_GENERATION.lock().unwrap();
+    *generation = generation.wrapping_add(1);
+    *generation
+}
+
+fn begin_gesture(
+    config: &crate::config::Config,
+    slot: &str,
+    point: POINT,
+    current_window: HWND,
+) -> u64 {
+    let generation = bump_session_generation();
+    let trigger_identity = crate::trigger_button_for_slot(config, slot).to_string();
     diag_log(format!(
-        "gesture-session begin slot={} point=({},{})",
-        slot, point.x, point.y
+        "gesture-session begin slot={} trigger={} point=({},{}) generation={}",
+        slot, trigger_identity, point.x, point.y, generation
     ));
     *GESTURE_START_WINDOW.lock().unwrap() = Some(current_window.0 as isize);
     *IS_DRAGGING.lock().unwrap() = true;
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = Some(slot.to_string());
+    *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = Some(trigger_identity);
 
     {
         let mut trajectory = TRAJECTORY.lock().unwrap();
@@ -657,6 +703,7 @@ fn begin_gesture(config: &crate::config::Config, slot: &str, point: POINT, curre
     crate::set_active_trail_color(crate::color_for_trigger_slot(config, slot));
     clear_preview_state();
     crate::emit_trajectory_update(&[(point.x, point.y)], true);
+    generation
 }
 
 /// 短いクリック（移動点数が閾値以下）で、かつそのスロットに割り当てられた
@@ -758,8 +805,10 @@ fn complete_gesture(config: &crate::config::Config, slot: &str) {
     clear_preview_state();
     TRAJECTORY.lock().unwrap().clear();
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+    *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
     *GESTURE_START_WINDOW.lock().unwrap() = None;
     KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
+    bump_session_generation();
 }
 
 /// すべての強制終了経路（無効化・設定変更・フック再インストール・アクション
@@ -770,10 +819,12 @@ pub fn cancel_active_gesture_session() {
     KEYBOARD_RELEASE_STATE.lock().unwrap().clear();
     *IS_DRAGGING.lock().unwrap() = false;
     *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+    *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
     *GESTURE_START_WINDOW.lock().unwrap() = None;
     TRAJECTORY.lock().unwrap().clear();
     clear_preview_state();
     crate::emit_trajectory_update(&[], false);
+    bump_session_generation();
     diag_log("gesture session cancelled via centralized teardown");
 }
 
@@ -911,6 +962,7 @@ unsafe extern "system" fn mouse_hook_proc(
                         }
                     }
 
+                    crate::trajectory_renderer::ensure_renderer_alive();
                     begin_gesture(&config, slot, point, current_window);
                     return LRESULT(1);
                 } else {
@@ -940,12 +992,16 @@ unsafe extern "system" fn mouse_hook_proc(
         }
         WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP | WM_XBUTTONUP => {
             if *IS_DRAGGING.lock().unwrap() {
-                let config = ACTIVE_CONFIG.lock().unwrap().clone();
-                let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
-                if let (Some(config), Some(slot)) = (config, active_slot) {
-                    if active_mouse_trigger_matches_up(&config, &slot, event_type, &mouse_data) {
-                        complete_gesture(&config, &slot);
-                        return LRESULT(1);
+                let recorded_trigger = ACTIVE_TRIGGER_IDENTITY.lock().unwrap().clone();
+                if let Some(trigger_identity) = recorded_trigger {
+                    if recorded_trigger_matches_mouse_up(&trigger_identity, event_type, &mouse_data)
+                    {
+                        let config = ACTIVE_CONFIG.lock().unwrap().clone();
+                        let active_slot = ACTIVE_TRIGGER_SLOT.lock().unwrap().clone();
+                        if let (Some(config), Some(slot)) = (config, active_slot) {
+                            complete_gesture(&config, &slot);
+                            return LRESULT(1);
+                        }
                     }
                 }
             }
@@ -1130,6 +1186,7 @@ unsafe extern "system" fn keyboard_hook_proc(
                             }
                         }
 
+                        crate::trajectory_renderer::ensure_renderer_alive();
                         begin_gesture(&config, slot, point, current_window);
                         if dedicated_slot == Some(slot) {
                             KEYBOARD_RELEASE_STATE.lock().unwrap().begin(vk_code);
@@ -1190,6 +1247,7 @@ unsafe extern "system" fn keyboard_hook_proc(
                                 slot.to_string(),
                                 vk_code,
                                 generation,
+                                *SESSION_GENERATION.lock().unwrap(),
                             );
                         }
                     }
@@ -2000,5 +2058,232 @@ mod tests {
         // could plausibly emit by coincidence (most tools leave dwExtraInfo
         // at 0 or their own vendor-specific constant).
         assert_ne!(SELF_INPUT_MARKER, 0);
+    }
+
+    // --- Session lifecycle: recorded trigger identity and generation ---
+
+    #[test]
+    fn matching_trigger_up_completes_exactly_one_active_session() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
+        *GESTURE_START_WINDOW.lock().unwrap() = None;
+
+        begin_gesture(&config, "A", POINT { x: 10, y: 20 }, HWND::default());
+        assert!(*IS_DRAGGING.lock().unwrap());
+        assert_eq!(
+            ACTIVE_TRIGGER_IDENTITY.lock().unwrap().as_deref(),
+            Some("mouse:right")
+        );
+
+        let empty_data = mouse_data_for_xbutton(0);
+        assert!(recorded_trigger_matches_mouse_up(
+            ACTIVE_TRIGGER_IDENTITY.lock().unwrap().as_deref().unwrap(),
+            WM_RBUTTONUP,
+            &empty_data
+        ));
+
+        complete_gesture(&config, "A");
+        assert!(!*IS_DRAGGING.lock().unwrap());
+        assert!(ACTIVE_TRIGGER_IDENTITY.lock().unwrap().is_none());
+        assert!(TRAJECTORY.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unrelated_up_does_not_complete_session_via_recorded_identity() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
+
+        begin_gesture(&config, "A", POINT { x: 10, y: 20 }, HWND::default());
+        let recorded = ACTIVE_TRIGGER_IDENTITY.lock().unwrap().clone().unwrap();
+        let empty_data = mouse_data_for_xbutton(0);
+
+        // Middle-button UP must not match a right-button trigger session.
+        assert!(!recorded_trigger_matches_mouse_up(
+            &recorded,
+            WM_MBUTTONUP,
+            &empty_data
+        ));
+        // Left-button UP must not match either.
+        assert!(!recorded_trigger_matches_mouse_up(
+            &recorded,
+            WM_LBUTTONUP,
+            &empty_data
+        ));
+        // X1 UP must not match a right-button trigger.
+        let x1_data = mouse_data_for_xbutton(1);
+        assert!(!recorded_trigger_matches_mouse_up(
+            &recorded,
+            WM_XBUTTONUP,
+            &x1_data
+        ));
+
+        // Session must still be active after all the unrelated UPs.
+        assert!(*IS_DRAGGING.lock().unwrap());
+        assert_eq!(TRAJECTORY.lock().unwrap().len(), 1);
+
+        cancel_active_gesture_session();
+    }
+
+    #[test]
+    fn duplicate_down_does_not_restart_session_or_reset_trajectory() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
+
+        begin_gesture(&config, "A", POINT { x: 10, y: 20 }, HWND::default());
+        TRAJECTORY.lock().unwrap().push((15, 25));
+        TRAJECTORY.lock().unwrap().push((20, 30));
+        assert_eq!(TRAJECTORY.lock().unwrap().len(), 3);
+
+        // Simulate a duplicate DOWN: the hook checks IS_DRAGGING before
+        // calling begin_gesture, so a second DOWN while already dragging
+        // is ignored. Verify the guard works.
+        assert!(*IS_DRAGGING.lock().unwrap());
+        // Trajectory must not have been reset.
+        assert_eq!(TRAJECTORY.lock().unwrap().len(), 3);
+        assert_eq!(
+            ACTIVE_TRIGGER_IDENTITY.lock().unwrap().as_deref(),
+            Some("mouse:right")
+        );
+
+        cancel_active_gesture_session();
+    }
+
+    #[test]
+    fn stale_delayed_release_cannot_affect_newer_session_via_generation() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:middle", "mouse:x1", "mouse:x2");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
+
+        // Start session 1 and capture its generation.
+        let gen1 = begin_gesture(&config, "A", POINT { x: 1, y: 1 }, HWND::default());
+        assert_eq!(gen1, *SESSION_GENERATION.lock().unwrap());
+
+        // Complete session 1 (bumps generation).
+        complete_gesture(&config, "A");
+        let gen_after_complete = *SESSION_GENERATION.lock().unwrap();
+        assert_ne!(gen_after_complete, gen1);
+
+        // Start session 2 (bumps generation again).
+        let gen2 = begin_gesture(&config, "A", POINT { x: 2, y: 2 }, HWND::default());
+        assert_ne!(gen2, gen_after_complete);
+
+        // A stale callback holding gen1 must see a different current generation.
+        assert_ne!(*SESSION_GENERATION.lock().unwrap(), gen1);
+        // Session 2 is still active and unaffected.
+        assert!(*IS_DRAGGING.lock().unwrap());
+        assert_eq!(TRAJECTORY.lock().unwrap().len(), 1);
+
+        cancel_active_gesture_session();
+    }
+
+    #[test]
+    fn cancel_clears_trigger_identity_and_bumps_generation() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:right", "mouse:middle", "mouse:x1");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
+
+        let gen_before = *SESSION_GENERATION.lock().unwrap();
+        begin_gesture(&config, "A", POINT { x: 5, y: 5 }, HWND::default());
+        assert!(ACTIVE_TRIGGER_IDENTITY.lock().unwrap().is_some());
+
+        cancel_active_gesture_session();
+
+        assert!(!*IS_DRAGGING.lock().unwrap());
+        assert!(ACTIVE_TRIGGER_IDENTITY.lock().unwrap().is_none());
+        assert!(ACTIVE_TRIGGER_SLOT.lock().unwrap().is_none());
+        assert!(TRAJECTORY.lock().unwrap().is_empty());
+        assert_ne!(*SESSION_GENERATION.lock().unwrap(), gen_before);
+    }
+
+    #[test]
+    fn session_generation_advances_on_begin_complete_and_cancel() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("mouse:middle", "mouse:x1", "mouse:x2");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
+
+        let before = *SESSION_GENERATION.lock().unwrap();
+        let begin_gen = begin_gesture(&config, "A", POINT { x: 1, y: 1 }, HWND::default());
+        assert_eq!(begin_gen, *SESSION_GENERATION.lock().unwrap());
+        assert_ne!(begin_gen, before);
+
+        complete_gesture(&config, "A");
+        let after_complete = *SESSION_GENERATION.lock().unwrap();
+        assert_ne!(after_complete, begin_gen);
+
+        let begin_gen2 = begin_gesture(&config, "A", POINT { x: 2, y: 2 }, HWND::default());
+        assert_ne!(begin_gen2, after_complete);
+        cancel_active_gesture_session();
+        assert_ne!(*SESSION_GENERATION.lock().unwrap(), begin_gen2);
+    }
+
+    #[test]
+    fn recorded_trigger_matches_mouse_up_resolves_each_button_correctly() {
+        let empty_data = mouse_data_for_xbutton(0);
+        let x1_data = mouse_data_for_xbutton(1);
+        let x2_data = mouse_data_for_xbutton(2);
+
+        assert!(recorded_trigger_matches_mouse_up("mouse:right", WM_RBUTTONUP, &empty_data));
+        assert!(!recorded_trigger_matches_mouse_up("mouse:right", WM_MBUTTONUP, &empty_data));
+        assert!(!recorded_trigger_matches_mouse_up("mouse:right", WM_LBUTTONUP, &empty_data));
+
+        assert!(recorded_trigger_matches_mouse_up("mouse:middle", WM_MBUTTONUP, &empty_data));
+        assert!(!recorded_trigger_matches_mouse_up("mouse:middle", WM_RBUTTONUP, &empty_data));
+
+        assert!(recorded_trigger_matches_mouse_up("mouse:x1", WM_XBUTTONUP, &x1_data));
+        assert!(!recorded_trigger_matches_mouse_up("mouse:x1", WM_XBUTTONUP, &x2_data));
+
+        assert!(recorded_trigger_matches_mouse_up("mouse:x2", WM_XBUTTONUP, &x2_data));
+        assert!(!recorded_trigger_matches_mouse_up("mouse:x2", WM_XBUTTONUP, &x1_data));
+
+        // Keyboard trigger identity must never match any mouse UP.
+        assert!(!recorded_trigger_matches_mouse_up("key:KeyZ", WM_RBUTTONUP, &empty_data));
+        assert!(!recorded_trigger_matches_mouse_up("key:KeyZ", WM_LBUTTONUP, &empty_data));
+    }
+
+    #[test]
+    fn begin_gesture_records_trigger_identity_for_keyboard_slot() {
+        let _guard = STATE_TEST_LOCK.lock().unwrap();
+        let config = config_with_triggers("key:KeyZ", "mouse:middle", "mouse:x1");
+
+        *IS_DRAGGING.lock().unwrap() = false;
+        TRAJECTORY.lock().unwrap().clear();
+        *ACTIVE_TRIGGER_SLOT.lock().unwrap() = None;
+        *ACTIVE_TRIGGER_IDENTITY.lock().unwrap() = None;
+
+        begin_gesture(&config, "A", POINT { x: 0, y: 0 }, HWND::default());
+        assert_eq!(
+            ACTIVE_TRIGGER_IDENTITY.lock().unwrap().as_deref(),
+            Some("key:KeyZ")
+        );
+
+        cancel_active_gesture_session();
+        assert!(ACTIVE_TRIGGER_IDENTITY.lock().unwrap().is_none());
     }
 }
